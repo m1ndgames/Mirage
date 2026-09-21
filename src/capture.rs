@@ -1,5 +1,6 @@
 use anyhow::Context;
 use windows::core::Interface;
+use windows::Foundation::TypedEventHandler;
 use windows::Graphics::Capture::{
     Direct3D11CaptureFrame, Direct3D11CaptureFramePool, GraphicsCaptureAccess, GraphicsCaptureAccessKind,
     GraphicsCaptureItem, GraphicsCaptureSession,
@@ -7,8 +8,10 @@ use windows::Graphics::Capture::{
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
 use windows::Graphics::SizeInt32;
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
 use windows::Win32::Graphics::Gdi::HMONITOR;
+use windows::Win32::System::Threading::{CreateEventW, SetEvent};
 use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 
@@ -23,6 +26,10 @@ pub struct MonitorCapture {
     session: GraphicsCaptureSession,
     device: IDirect3DDevice,
     size: SizeInt32,
+    /// Auto-reset Win32 event, signalled from the pool's worker thread whenever
+    /// a frame arrives, so the render loop can sleep instead of polling.
+    frame_event: HANDLE,
+    frame_arrived_token: i64,
 }
 
 /// A captured frame. Keeps the WGC frame alive so the pool cannot recycle the
@@ -43,6 +50,12 @@ impl MonitorCapture {
         println!("capture item {}x{}", size.Width, size.Height);
 
         let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(&device, FORMAT, BUFFERS, size)?;
+        let frame_event = unsafe { CreateEventW(None, false, false, None) }?;
+        let event_value = frame_event.0 as isize;
+        let frame_arrived_token = pool.FrameArrived(&TypedEventHandler::new(move |_, _| {
+            unsafe { SetEvent(HANDLE(event_value as *mut _)) }?;
+            Ok(())
+        }))?;
         let session = pool.CreateCaptureSession(&item)?;
         session.SetIsCursorCaptureEnabled(false)?;
 
@@ -58,12 +71,17 @@ impl MonitorCapture {
         }
 
         session.StartCapture()?;
-        Ok(Self { _item: item, pool, session, device, size })
+        Ok(Self { _item: item, pool, session, device, size, frame_event, frame_arrived_token })
     }
 
     /// Current frame size in physical pixels.
     pub fn size(&self) -> (i32, i32) {
         (self.size.Width, self.size.Height)
+    }
+
+    /// Waitable handle that becomes signalled when at least one frame is pending.
+    pub fn frame_event(&self) -> HANDLE {
+        self.frame_event
     }
 
     /// The newest frame, or `None` when nothing new arrived since the last call.
@@ -91,6 +109,10 @@ impl MonitorCapture {
 impl Drop for MonitorCapture {
     fn drop(&mut self) {
         let _ = self.session.Close();
+        let _ = self.pool.RemoveFrameArrived(self.frame_arrived_token);
         let _ = self.pool.Close();
+        unsafe {
+            let _ = CloseHandle(self.frame_event);
+        }
     }
 }

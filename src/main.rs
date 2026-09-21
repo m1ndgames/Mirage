@@ -7,8 +7,10 @@ mod renderer;
 mod window;
 
 use anyhow::anyhow;
+use windows::Win32::Foundation::WAIT_OBJECT_0;
 use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
 use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
+use windows::Win32::UI::WindowsAndMessaging::{MsgWaitForMultipleObjectsEx, MWMO_INPUTAVAILABLE, QS_ALLINPUT};
 
 use crate::geometry::Rect;
 
@@ -46,15 +48,61 @@ fn main() -> anyhow::Result<()> {
     let mut capture = capture::MonitorCapture::new(d3d.winrt_device()?, src.handle)?;
     println!("capturing – Ctrl+C to quit");
 
-    while window::pump_messages() {
-        renderer.wait_for_frame_slot();
-        if let Some(frame) = capture.try_next_frame()? {
-            renderer.ensure_source(frame.width as u32, frame.height as u32)?;
-            renderer.copy_frame(&frame.texture);
+    // Event driven: sleep until WGC signals a frame or a window message arrives,
+    // then present exactly once per newest frame. Presenting is never paced by
+    // Present() blocking – on this machine it doesn't (see PLAN.md, M0 results).
+    let mut stats = Stats::new();
+    loop {
+        let wait = unsafe {
+            MsgWaitForMultipleObjectsEx(Some(&[capture.frame_event()]), 1000, QS_ALLINPUT, MWMO_INPUTAVAILABLE)
+        };
+        if !window::pump_messages() {
+            break;
         }
-        let (w, h) = capture.size();
-        renderer.draw(rect.clamp_to(w, h).to_uv(w, h))?;
-        renderer.present()?;
+        if wait == WAIT_OBJECT_0 {
+            // Drain the pool so a slow target only ever shows the newest frame.
+            let mut newest = None;
+            while let Some(frame) = capture.try_next_frame()? {
+                newest = Some(frame);
+                stats.captured += 1;
+            }
+            if let Some(frame) = newest {
+                renderer.wait_for_frame_slot();
+                renderer.ensure_source(frame.width as u32, frame.height as u32)?;
+                renderer.copy_frame(&frame.texture);
+                let (w, h) = capture.size();
+                renderer.draw(rect.clamp_to(w, h).to_uv(w, h))?;
+                renderer.present()?;
+                stats.presented += 1;
+            }
+        }
+        stats.report_if_due();
     }
     Ok(())
+}
+
+/// Once-per-second throughput report. Capture rate follows the source monitor,
+/// present rate follows the target (60 Hz on the DisplayLink screen).
+struct Stats {
+    started: std::time::Instant,
+    captured: u32,
+    presented: u32,
+}
+
+impl Stats {
+    fn new() -> Self {
+        Stats { started: std::time::Instant::now(), captured: 0, presented: 0 }
+    }
+
+    fn report_if_due(&mut self) {
+        let elapsed = self.started.elapsed().as_secs_f32();
+        if elapsed >= 1.0 {
+            println!(
+                "captured {:.0} fps / presented {:.0} fps",
+                self.captured as f32 / elapsed,
+                self.presented as f32 / elapsed
+            );
+            *self = Stats::new();
+        }
+    }
 }
