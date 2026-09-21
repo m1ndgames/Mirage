@@ -8,24 +8,6 @@ pub struct Rect {
 }
 
 impl Rect {
-    /// Parses "x,y,w,h" (whitespace around numbers is ignored).
-    pub fn parse(s: &str) -> Result<Rect, String> {
-        let parts: Vec<&str> = s.split(',').map(str::trim).collect();
-        if parts.len() != 4 {
-            return Err(format!("expected x,y,w,h – got '{s}'"));
-        }
-        let nums = parts
-            .iter()
-            .map(|p| p.parse::<i32>())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("invalid number in '{s}': {e}"))?;
-        let r = Rect { x: nums[0], y: nums[1], w: nums[2], h: nums[3] };
-        if r.w <= 0 || r.h <= 0 {
-            return Err(format!("width and height must be positive – got '{s}'"));
-        }
-        Ok(r)
-    }
-
     /// Clamps the rectangle into a `width`×`height` monitor. The result is never
     /// empty, so a rectangle that lies entirely outside becomes a 1×1 pixel in
     /// the bottom-right corner rather than a zero-sized crop.
@@ -47,23 +29,6 @@ impl Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parses_four_numbers() {
-        assert_eq!(Rect::parse("10, 20,300,400"), Ok(Rect { x: 10, y: 20, w: 300, h: 400 }));
-    }
-
-    #[test]
-    fn rejects_wrong_count_and_bad_numbers() {
-        assert!(Rect::parse("1,2,3").is_err());
-        assert!(Rect::parse("1,2,3,x").is_err());
-    }
-
-    #[test]
-    fn rejects_non_positive_size() {
-        assert!(Rect::parse("0,0,0,10").is_err());
-        assert!(Rect::parse("0,0,10,-1").is_err());
-    }
 
     #[test]
     fn clamps_to_monitor_bounds() {

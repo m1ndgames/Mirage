@@ -141,6 +141,7 @@ fn run(rx: Receiver<Command>, wake: isize, events: Sender<Event>, repaint: Arc<d
     // GPU would need a rebuild of the device – not supported (PLAN.md: one GPU).
     let primary = identity::attached()?.into_iter().find(|m| m.info.is_primary).context("no primary monitor")?;
     let d3d = d3d::create_for_monitor(primary.info.handle)?;
+    println!("rendering on {}", d3d.adapter_name);
     let pipeline = Pipeline::new(&d3d)?;
     let mut engine = Engine {
         d3d,

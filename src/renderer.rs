@@ -117,14 +117,6 @@ impl SwapChainTarget {
         })
     }
 
-    pub fn width(&self) -> u32 {
-        self.width
-    }
-
-    pub fn height(&self) -> u32 {
-        self.height
-    }
-
     /// Blocks until the swap chain can accept another frame (at most ~1 s).
     /// On the dev machine this never blocks (PLAN.md, M0 results) – pacing is
     /// event driven; this is only a safety net.

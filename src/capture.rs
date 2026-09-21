@@ -76,11 +76,6 @@ impl MonitorCapture {
         Ok(Self { _item: item, pool, session, device, size, frame_event, frame_arrived_token })
     }
 
-    /// Current frame size in physical pixels.
-    pub fn size(&self) -> (i32, i32) {
-        (self.size.Width, self.size.Height)
-    }
-
     /// Waitable handle that becomes signalled when at least one frame is pending.
     pub fn frame_event(&self) -> HANDLE {
         self.frame_event
