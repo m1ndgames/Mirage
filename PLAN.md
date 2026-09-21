@@ -116,8 +116,8 @@ Mapping:
 - `source`: monitor id + rect (physical pixels)
 - `target`: monitor id + rect (default: whole monitor). A sub-rect allows several mappings to be tiled on
   one small screen (e.g. left and right MFD side by side).
-- `transform`: `flip_h`, `flip_v`, `rotation` (0/90/180/270), `fit` (`stretch` / `fit` = letterbox /
-  `fill` = crop to aspect), `filter` (`linear` / `nearest`)
+- `flip_h`, `flip_v`, `rotation` (0/90/180/270, clockwise), `fit` (`stretch` / `fit` = letterbox /
+  `fill` = crop to aspect, default `fit`), `filter` (`linear` / `nearest`, default `linear`)
 
 One output window per target monitor; every mapping that targets it is drawn as a quad into that window.
 Rects are stored relative to the monitor's own top-left corner in physical pixels – **never** in virtual
@@ -221,7 +221,10 @@ label: name + serial suffix.
 - **M1 – Region selection:** settings window + overlay on a frozen frame, choose source and target
   monitor. Includes monitor enumeration with stable identity and hot-plug handling from the start – the
   picker must survive unplugging the cockpit screen while Mirage is running. **Done 2026-09-21, see below.**
-- **M2 – Transforms:** mirror, rotate, fit modes, filter.
+- **M2 – Transforms:** mirror, rotate, fit modes, filter. **Done 2026-09-21.** One 2×3 UV matrix per
+  mapping (crop, flips, rotation and fill-crop folded in, `transform::layout`, 11 unit tests); `fit`
+  shrinks the viewport, `fill` crops the source; two sampler states for linear/nearest. Default is
+  `fit` (letterbox) – the user's choice. UI: a second row per mapping.
 - **M3 – Profiles:** config file, several mappings per profile, tiling on one target.
 - **M4 – Polish:** tray icon, hotkeys, autostart, process-based profile switching.
 

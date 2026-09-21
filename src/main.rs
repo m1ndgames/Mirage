@@ -9,6 +9,7 @@ mod identity;
 mod monitors;
 mod overlay;
 mod renderer;
+mod transform;
 mod ui;
 mod window;
 

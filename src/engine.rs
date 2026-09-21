@@ -18,6 +18,7 @@ use crate::hotkey;
 use crate::identity::{self, AttachedMonitor, MonitorId};
 use crate::overlay::{Outcome, Selection};
 use crate::renderer::{Pipeline, SourceTexture, SwapChainTarget};
+use crate::transform;
 use crate::window::{self, OutputWindow, WindowSignals};
 
 pub enum Command {
@@ -343,8 +344,8 @@ impl Engine {
             for m in &out.mappings {
                 let Some(src) = self.sources.get(&m.source_handle).and_then(|s| s.texture.as_ref()) else { continue };
                 let (w, h) = (src.width as i32, src.height as i32);
-                let uv = m.source_rect.clamp_to(w, h).to_uv(w, h);
-                self.pipeline.draw_mirror(ctx, src, uv, m.target_rect);
+                let layout = transform::layout(&m.transform, m.source_rect.clamp_to(w, h), (w, h), m.target_rect);
+                self.pipeline.draw_mirror(ctx, src, &layout, m.transform.filter);
             }
             if let Err(e) = out.target.present() {
                 let _ = self.events.send(Event::Error(format!("present failed: {e:#}")));

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::geometry::Rect;
 use crate::identity::{AttachedMonitor, MonitorId};
+use crate::transform::{Filter, Fit, Transform};
 
 /// A monitor reference in a mapping: the current primary, or a concrete id.
 /// Serialised as the string `"primary"` or the id itself.
@@ -55,6 +56,12 @@ pub struct Mapping {
     pub target: MonitorId,
     /// Empty = the whole target monitor. Otherwise `[x, y, w, h]` relative to it.
     pub target_rect: Vec<i32>,
+    pub flip_h: bool,
+    pub flip_v: bool,
+    /// Clockwise degrees: 0, 90, 180 or 270.
+    pub rotation: u16,
+    pub fit: Fit,
+    pub filter: Filter,
 }
 
 impl Default for Mapping {
@@ -65,11 +72,20 @@ impl Default for Mapping {
             source_size: [0, 0],
             target: String::new(),
             target_rect: Vec::new(),
+            flip_h: false,
+            flip_v: false,
+            rotation: 0,
+            fit: Fit::default(),
+            filter: Filter::default(),
         }
     }
 }
 
 impl Mapping {
+    pub fn transform(&self) -> Transform {
+        Transform { flip_h: self.flip_h, flip_v: self.flip_v, rotation: self.rotation, fit: self.fit, filter: self.filter }
+    }
+
     /// The source rect for the monitor's current size: scaled proportionally if
     /// the monitor changed resolution since the rect was drawn, then clamped.
     pub fn effective_rect(&self, current: (i32, i32)) -> Rect {
@@ -247,6 +263,7 @@ pub struct ActiveMapping {
     pub target_handle: isize,
     /// Relative to the target monitor's top-left corner.
     pub target_rect: Rect,
+    pub transform: Transform,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -290,6 +307,7 @@ pub fn resolve(profile: &Profile, attached: &[AttachedMonitor]) -> Vec<Resolved>
                 source_rect: m.effective_rect(source_size),
                 target_handle: target.info.handle,
                 target_rect,
+                transform: m.transform(),
             })
         })
         .collect()
@@ -333,6 +351,7 @@ mod tests {
             source_size: [2560, 1440],
             target: target.to_string(),
             target_rect: vec![],
+            ..Default::default()
         }
     }
 
@@ -458,6 +477,21 @@ mod tests {
         assert!(c.note_attached(&moved));
         assert_eq!(c.monitors[0].label, "Main", "labels are never overwritten");
         assert_eq!(c.monitors[0].last_size, [1920, 1440]);
+    }
+
+    #[test]
+    fn transform_fields_round_trip_and_default_to_fit_linear() {
+        let mut m = mapping(MonitorRef::Primary, "t");
+        assert_eq!(m.transform(), Transform::default());
+        assert_eq!(m.fit, Fit::Fit);
+        m.flip_h = true;
+        m.rotation = 90;
+        m.fit = Fit::Fill;
+        m.filter = Filter::Nearest;
+        let mut c = Config::default();
+        c.active_profile_mut().mappings.push(m.clone());
+        let back: Config = toml::from_str(&toml::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back.active_profile().mappings[0], m);
     }
 
     #[test]

@@ -4,6 +4,7 @@ use std::sync::mpsc::Receiver;
 use eframe::egui;
 
 use crate::config::{self, Config, Mapping, MonitorRef, Resolved};
+use crate::transform::{Filter, Fit};
 use crate::engine::{Command, EngineHandle, Event, RegionSelected};
 use crate::identity::AttachedMonitor;
 
@@ -190,6 +191,8 @@ impl App {
                     remove = Some(i);
                 }
             });
+            self.transform_row(ui, i);
+            ui.add_space(4.0);
         }
         if let Some(i) = remove {
             self.config.active_profile_mut().mappings.remove(i);
@@ -209,6 +212,55 @@ impl App {
             "{} selects a region for the highlighted mapping (or creates one).",
             self.config.select_region_hotkey
         ));
+    }
+}
+
+impl App {
+    /// Second line of a mapping row: flips, rotation, fit mode, filter.
+    fn transform_row(&mut self, ui: &mut egui::Ui, i: usize) {
+        let m = &mut self.config.active_profile_mut().mappings[i];
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            ui.add_space(24.0);
+            changed |= ui.checkbox(&mut m.flip_h, "flip H").changed();
+            changed |= ui.checkbox(&mut m.flip_v, "flip V").changed();
+            ui.label("rotate");
+            egui::ComboBox::from_id_salt(("rotation", i)).selected_text(format!("{}°", m.rotation)).show_ui(ui, |ui| {
+                for r in [0u16, 90, 180, 270] {
+                    changed |= ui.selectable_value(&mut m.rotation, r, format!("{r}°")).changed();
+                }
+            });
+            ui.label("fit");
+            egui::ComboBox::from_id_salt(("fit", i)).selected_text(fit_name(m.fit)).show_ui(ui, |ui| {
+                for f in [Fit::Fit, Fit::Fill, Fit::Stretch] {
+                    changed |= ui.selectable_value(&mut m.fit, f, fit_name(f)).changed();
+                }
+            });
+            ui.label("filter");
+            egui::ComboBox::from_id_salt(("filter", i)).selected_text(filter_name(m.filter)).show_ui(ui, |ui| {
+                for f in [Filter::Linear, Filter::Nearest] {
+                    changed |= ui.selectable_value(&mut m.filter, f, filter_name(f)).changed();
+                }
+            });
+        });
+        if changed {
+            self.dirty = true;
+        }
+    }
+}
+
+fn fit_name(fit: Fit) -> &'static str {
+    match fit {
+        Fit::Fit => "fit (letterbox)",
+        Fit::Fill => "fill (crop)",
+        Fit::Stretch => "stretch",
+    }
+}
+
+fn filter_name(filter: Filter) -> &'static str {
+    match filter {
+        Filter::Linear => "linear",
+        Filter::Nearest => "nearest",
     }
 }
 

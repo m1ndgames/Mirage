@@ -6,7 +6,7 @@ use windows::Win32::Graphics::Direct3D::{ID3DBlob, D3D11_PRIMITIVE_TOPOLOGY_TRIA
 use windows::Win32::Graphics::Direct3D11::{
     ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader, ID3D11RenderTargetView, ID3D11SamplerState,
     ID3D11ShaderResourceView, ID3D11Texture2D, ID3D11VertexShader, D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_SHADER_RESOURCE,
-    D3D11_BUFFER_DESC, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_SAMPLER_DESC, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC,
+    D3D11_BUFFER_DESC, D3D11_FILTER, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_SAMPLER_DESC, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC,
     D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
@@ -18,6 +18,7 @@ use windows::Win32::System::Threading::WaitForSingleObjectEx;
 
 use crate::d3d::D3d;
 use crate::geometry::Rect;
+use crate::transform::{Filter, Layout};
 
 const SHADER_SOURCE: &str = include_str!("shaders.hlsl");
 
@@ -144,10 +145,14 @@ pub struct Pipeline {
     vs: ID3D11VertexShader,
     ps_mirror: ID3D11PixelShader,
     ps_overlay: ID3D11PixelShader,
-    sampler: ID3D11SamplerState,
+    sampler_linear: ID3D11SamplerState,
+    sampler_nearest: ID3D11SamplerState,
     crop_buffer: ID3D11Buffer,
     overlay_buffer: ID3D11Buffer,
 }
+
+/// Identity layout matrix: quad UV = source UV.
+const IDENTITY: [f32; 6] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
 
 impl Pipeline {
     pub fn new(d3d: &D3d) -> anyhow::Result<Self> {
@@ -162,35 +167,31 @@ impl Pipeline {
             d3d.device.CreatePixelShader(blob_bytes(&ps_blob), None, Some(&mut ps_mirror))?;
             d3d.device.CreatePixelShader(blob_bytes(&ov_blob), None, Some(&mut ps_overlay))?;
         }
-        let sampler_desc = D3D11_SAMPLER_DESC {
-            Filter: D3D11_FILTER_MIN_MAG_MIP_LINEAR,
-            AddressU: D3D11_TEXTURE_ADDRESS_CLAMP,
-            AddressV: D3D11_TEXTURE_ADDRESS_CLAMP,
-            AddressW: D3D11_TEXTURE_ADDRESS_CLAMP,
-            MaxLOD: f32::MAX,
-            ..Default::default()
-        };
-        let mut sampler = None;
-        unsafe { d3d.device.CreateSamplerState(&sampler_desc, Some(&mut sampler)) }?;
         Ok(Pipeline {
             vs: vs.ok_or_else(|| anyhow!("no vertex shader"))?,
             ps_mirror: ps_mirror.ok_or_else(|| anyhow!("no mirror shader"))?,
             ps_overlay: ps_overlay.ok_or_else(|| anyhow!("no overlay shader"))?,
-            sampler: sampler.ok_or_else(|| anyhow!("no sampler"))?,
-            crop_buffer: constant_buffer(&d3d.device, 16)?,
+            sampler_linear: sampler(&d3d.device, D3D11_FILTER_MIN_MAG_MIP_LINEAR)?,
+            sampler_nearest: sampler(&d3d.device, D3D11_FILTER_MIN_MAG_MIP_POINT)?,
+            crop_buffer: constant_buffer(&d3d.device, 32)?,
             overlay_buffer: constant_buffer(&d3d.device, 32)?,
         })
     }
 
-    /// Draws `src` cropped to `uv` (`[u0, v0, du, dv]`) into the window
-    /// rectangle `dst` of the current render target.
-    pub fn draw_mirror(&self, ctx: &ID3D11DeviceContext, src: &SourceTexture, uv: [f32; 4], dst: Rect) {
+    /// Draws `src` through `layout` (viewport + UV matrix) into the current
+    /// render target.
+    pub fn draw_mirror(&self, ctx: &ID3D11DeviceContext, src: &SourceTexture, layout: &Layout, filter: Filter) {
         unsafe {
-            ctx.UpdateSubresource(&self.crop_buffer, 0, None, uv.as_ptr() as *const _, 0, 0);
-            self.bind(ctx, src, &self.ps_mirror, dst);
+            self.set_matrix(ctx, layout.matrix);
+            self.bind(ctx, src, &self.ps_mirror, layout.dst, filter);
             ctx.Draw(3, 0);
             ctx.PSSetShaderResources(0, Some(&[None]));
         }
+    }
+
+    unsafe fn set_matrix(&self, ctx: &ID3D11DeviceContext, m: [f32; 6]) {
+        let rows: [f32; 8] = [m[0], m[1], m[2], 0.0, m[3], m[4], m[5], 0.0];
+        unsafe { ctx.UpdateSubresource(&self.crop_buffer, 0, None, rows.as_ptr() as *const _, 0, 0) };
     }
 
     /// Draws the frozen `src` over the whole window, dimmed outside `selection`
@@ -205,16 +206,20 @@ impl Pipeline {
         let params: [f32; 8] = [sel[0], sel[1], sel[2], sel[3], 1.0 / w, 1.0 / h, has, 0.0];
         let full = Rect { x: 0, y: 0, w: target.width as i32, h: target.height as i32 };
         unsafe {
-            ctx.UpdateSubresource(&self.crop_buffer, 0, None, [0.0f32, 0.0, 1.0, 1.0].as_ptr() as *const _, 0, 0);
+            self.set_matrix(ctx, IDENTITY);
             ctx.UpdateSubresource(&self.overlay_buffer, 0, None, params.as_ptr() as *const _, 0, 0);
-            self.bind(ctx, src, &self.ps_overlay, full);
+            self.bind(ctx, src, &self.ps_overlay, full, Filter::Linear);
             ctx.PSSetConstantBuffers(1, Some(&[Some(self.overlay_buffer.clone())]));
             ctx.Draw(3, 0);
             ctx.PSSetShaderResources(0, Some(&[None]));
         }
     }
 
-    unsafe fn bind(&self, ctx: &ID3D11DeviceContext, src: &SourceTexture, ps: &ID3D11PixelShader, dst: Rect) {
+    unsafe fn bind(&self, ctx: &ID3D11DeviceContext, src: &SourceTexture, ps: &ID3D11PixelShader, dst: Rect, filter: Filter) {
+        let sampler = match filter {
+            Filter::Linear => &self.sampler_linear,
+            Filter::Nearest => &self.sampler_nearest,
+        };
         unsafe {
             ctx.RSSetViewports(Some(&[D3D11_VIEWPORT {
                 TopLeftX: dst.x as f32,
@@ -230,9 +235,23 @@ impl Pipeline {
             ctx.VSSetConstantBuffers(0, Some(&[Some(self.crop_buffer.clone())]));
             ctx.PSSetShader(ps, None);
             ctx.PSSetShaderResources(0, Some(&[Some(src.srv.clone())]));
-            ctx.PSSetSamplers(0, Some(&[Some(self.sampler.clone())]));
+            ctx.PSSetSamplers(0, Some(&[Some(sampler.clone())]));
         }
     }
+}
+
+fn sampler(device: &ID3D11Device, filter: D3D11_FILTER) -> anyhow::Result<ID3D11SamplerState> {
+    let desc = D3D11_SAMPLER_DESC {
+        Filter: filter,
+        AddressU: D3D11_TEXTURE_ADDRESS_CLAMP,
+        AddressV: D3D11_TEXTURE_ADDRESS_CLAMP,
+        AddressW: D3D11_TEXTURE_ADDRESS_CLAMP,
+        MaxLOD: f32::MAX,
+        ..Default::default()
+    };
+    let mut sampler = None;
+    unsafe { device.CreateSamplerState(&desc, Some(&mut sampler)) }?;
+    sampler.ok_or_else(|| anyhow!("no sampler"))
 }
 
 fn constant_buffer(device: &ID3D11Device, bytes: u32) -> anyhow::Result<ID3D11Buffer> {

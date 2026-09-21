@@ -18,12 +18,6 @@ impl Rect {
         let y1 = (self.y + self.h).clamp(y0 + 1, height);
         Rect { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
     }
-
-    /// Normalised texture coordinates for a `width`×`height` frame: [u0, v0, du, dv].
-    pub fn to_uv(self, width: i32, height: i32) -> [f32; 4] {
-        let (fw, fh) = (width as f32, height as f32);
-        [self.x as f32 / fw, self.y as f32 / fh, self.w as f32 / fw, self.h as f32 / fh]
-    }
 }
 
 #[cfg(test)]
@@ -42,11 +36,5 @@ mod tests {
         let c = r.clamp_to(2560, 1440);
         assert!(c.w >= 1 && c.h >= 1);
         assert!(c.x + c.w <= 2560 && c.y + c.h <= 1440);
-    }
-
-    #[test]
-    fn converts_to_uv() {
-        let uv = Rect { x: 640, y: 360, w: 1280, h: 720 }.to_uv(2560, 1440);
-        assert_eq!(uv, [0.25, 0.25, 0.5, 0.5]);
     }
 }
