@@ -80,16 +80,16 @@ they do not block user-mode compositor capture (OBS works), but any process inte
     pipeline is one copy and one draw per captured frame; the M0 spike showed no perceptible end-to-end
     latency on the cockpit screen.
   - Its refresh rate is 60 Hz regardless of the source monitor.
-- **UI: egui / eframe** for the settings window *and* the region-selection overlay.
+- **UI: egui / eframe** for the settings window only.
   - Pure Rust, actively maintained, fastest to iterate; the settings UI is small (profiles, mappings,
     monitor pickers, transform toggles) and doesn't justify anything heavier.
-  - The overlay is a second egui viewport: borderless, always-on-top, positioned on the source monitor,
-    showing one frozen frame as an egui texture (a single CPU read-back – not latency relevant) with a
-    rubber-band rectangle on top. Convert egui points → physical pixels via `pixels_per_point`.
-  - If egui's multi-viewport positioning proves unreliable on mixed-DPI setups, the overlay falls back to
-    a raw Win32 window; the settings window stays egui.
   - Considered and rejected: raw Win32 controls (laborious), `native-windows-gui` (unmaintained),
     Slint / iced (heavier, no benefit at this size), WinUI 3 from Rust (painful), Tauri (webview).
+- **Selection overlay: Win32 + D3D11 on the render thread** (decided in M1, see
+  `docs/superpowers/specs/2026-09-21-m1-region-selection-design.md`). One topmost window per monitor
+  shows that monitor's frozen frame straight from a capture texture – no CPU read-back – with the
+  dim/border effect as a pixel shader. Mouse input arrives in physical pixels, so mixed DPI is a
+  non-issue. These are the only Mirage windows that ever take focus, and only while selecting.
 - **Config:** TOML file in `%APPDATA%\Mirage\`.
 - **Platform:** Windows 11 (primary). Windows 10 22H2 best effort (the WGC border cannot be disabled there).
 
@@ -98,9 +98,11 @@ they do not block user-mode compositor capture (OBS works), but any process inte
 ```
 capture   WGC session per source monitor → ID3D11Texture2D per frame (FrameArrived callback thread)
 output    one Win32 window + D3D11 swap chain per target monitor; draws all mappings for that monitor
-overlay   egui viewport: frozen frame + drag-select → returns a source rect in physical pixels
-config    profiles / mappings, TOML load & save, monitor identity by EDID / parent-device serial
-app       eframe settings window, tray icon, global hotkeys, foreground-process watcher for profile switching
+overlay   Win32 windows on the render thread, one per monitor, frozen D3D textures + ps_overlay
+identity  EDID / USB-serial / connector-path ids joined to HMONITORs via DisplayConfig
+config    profiles / mappings, TOML load & save, resolve() against the attached monitors
+engine    the render thread: commands in, events out, sources/outputs, topology rebuild, hotkey
+ui        eframe settings window; M4 adds tray icon and foreground-process watcher
 ```
 
 Capture and output share one D3D11 device (same GPU). Config changes flow from the UI to the render side
@@ -216,9 +218,9 @@ label: name + serial suffix.
   WinCtrl screen is only needed for the final check.
   Success criteria: runs alongside WarDogs (Elytra) and DCS/MSFS without anti-cheat complaints, latency
   feels fine, GPU overhead is negligible, works on the WinCtrl screen. **Done 2026-09-21, see below.**
-- **M1 – Region selection:** egui settings window + overlay on a frozen frame, choose source and target
+- **M1 – Region selection:** settings window + overlay on a frozen frame, choose source and target
   monitor. Includes monitor enumeration with stable identity and hot-plug handling from the start – the
-  picker must survive unplugging the cockpit screen while Mirage is running.
+  picker must survive unplugging the cockpit screen while Mirage is running. **Done 2026-09-21, see below.**
 - **M2 – Transforms:** mirror, rotate, fit modes, filter.
 - **M3 – Profiles:** config file, several mappings per profile, tiling on one target.
 - **M4 – Polish:** tray icon, hotkeys, autostart, process-based profile switching.
@@ -255,9 +257,32 @@ Spike lives in `src/` (`cargo run -- --help` style usage: `--list`, `--source N`
   comparing them. The 16:9 → 3:4 squash makes a correct crop *look* shifted – fit modes (M2) will
   fix the perception.
 
+### M1 results (2026-09-21)
+
+Acceptance (release build, fresh config, user at the keyboard): first start → `Ctrl+Shift+R` → drag →
+mirrored, row with `primary`; restart restores it; unplug/re-plug of the cockpit screen → row goes
+`dormant: target monitor absent` and back to `active`, Monitors table flips `absent`/`attached`;
+switching the Windows primary to another HP → the mapping follows; in WarDogs, `Ctrl+Shift+R` over the
+running game, drag the mini-map, the game keeps focus afterwards. All passed.
+
+- **Identity works as designed:** the three HP 27xq get `edid:HPN:3582:<serial>` ids, the Winwing screen
+  `usb:WWIN29320251005160820` (its EDID serial string is `"1"` – a placeholder; the "weak serial" rule
+  catches short or single-character-repeated strings, not just `0`). Nothing is port-bound.
+- **Message-only windows do not receive `WM_DISPLAYCHANGE`.** The first hot-plug test only *looked*
+  successful because Windows 11 restores window positions per monitor configuration; the log showed no
+  rebuild. The topology window is now a hidden top-level window and the rebuild is visible in the log.
+- **`Ctrl+Alt+M` and `Ctrl+Alt+R` are taken** by another program on the dev machine (RegisterHotKey →
+  `ERROR_HOTKEY_ALREADY_REGISTERED`). Default is `Ctrl+Shift+R`; the hotkey string is parsed from
+  `select_region_hotkey` in config.toml (M4 adds UI for it) and re-registered on change.
+- **DXGI adapter list** unchanged from M0 (RTX listed twice, DisplayLink screen is an output of the real
+  GPU); the "owner of the primary monitor" rule keeps picking the right one.
+- **Focus after selection:** destroying the overlay windows hands focus back to the previously active
+  window (the game) without any extra work.
+- Release binary is ~15 MB because eframe ships its own OpenGL renderer; the M0 spike was 276 KB.
+
 ## Open questions
 
-- **egui overlay positioning on mixed-DPI setups:** verify in M1; fall back to raw Win32 if needed.
+- None at the moment. M2 questions (fit-mode default, filter default) get asked when M2 starts.
 
 ## Non-goals
 
