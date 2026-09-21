@@ -28,3 +28,24 @@ float4 ps_main(VsOut i) : SV_Target
 {
     return source.Sample(linear_clamp, i.uv);
 }
+
+// Selection overlay: frozen frame, dimmed outside the selection, 2 px border.
+cbuffer Overlay : register(b1)
+{
+    float4 sel;    // u0, v0, u1, v1 of the selection
+    float4 px;     // 1/w, 1/h, has_selection, unused
+};
+
+float4 ps_overlay(VsOut i) : SV_Target
+{
+    float4 c = source.Sample(linear_clamp, i.uv);
+    float4 dim = c * float4(0.4, 0.4, 0.4, 1.0);
+    if (px.z < 0.5)
+        return dim;
+    bool inside = i.uv.x >= sel.x && i.uv.x <= sel.z && i.uv.y >= sel.y && i.uv.y <= sel.w;
+    if (inside)
+        return c;
+    float2 b = px.xy * 2.0;
+    bool border = i.uv.x >= sel.x - b.x && i.uv.x <= sel.z + b.x && i.uv.y >= sel.y - b.y && i.uv.y <= sel.w + b.y;
+    return border ? float4(1.0, 0.85, 0.2, 1.0) : dim;
+}

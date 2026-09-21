@@ -11,9 +11,12 @@ use windows::Graphics::SizeInt32;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
 use windows::Win32::Graphics::Gdi::HMONITOR;
-use windows::Win32::System::Threading::{CreateEventW, SetEvent};
+use windows::Win32::System::Threading::{CreateEventW, SetEvent, WaitForSingleObjectEx};
 use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
+
+use crate::d3d::D3d;
+use crate::renderer::SourceTexture;
 
 const FORMAT: DirectXPixelFormat = DirectXPixelFormat::B8G8R8A8UIntNormalized;
 const BUFFERS: i32 = 2;
@@ -47,7 +50,6 @@ impl MonitorCapture {
         let item: GraphicsCaptureItem =
             unsafe { interop.CreateForMonitor(HMONITOR(monitor_handle as *mut _)) }.context("CreateForMonitor")?;
         let size = item.Size()?;
-        println!("capture item {}x{}", size.Width, size.Height);
 
         let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(&device, FORMAT, BUFFERS, size)?;
         let frame_event = unsafe { CreateEventW(None, false, false, None) }?;
@@ -114,5 +116,27 @@ impl Drop for MonitorCapture {
         unsafe {
             let _ = CloseHandle(self.frame_event);
         }
+    }
+}
+
+/// One frame of `monitor_handle` as a fresh texture, via a temporary capture
+/// session. A monitor that yields nothing within `timeout_ms` (e.g. one that
+/// is asleep) gives a black texture so selection still works there.
+pub fn grab_one_frame(d3d: &D3d, monitor_handle: isize, width: u32, height: u32, timeout_ms: u32) -> anyhow::Result<SourceTexture> {
+    let mut capture = MonitorCapture::new(d3d.winrt_device()?, monitor_handle)?;
+    unsafe {
+        let _ = WaitForSingleObjectEx(capture.frame_event(), timeout_ms, false);
+    }
+    let mut newest = None;
+    while let Some(frame) = capture.try_next_frame()? {
+        newest = Some(frame);
+    }
+    match newest {
+        Some(frame) if frame.width as u32 == width && frame.height as u32 == height => {
+            let texture = SourceTexture::new(&d3d.device, width, height)?;
+            texture.copy_from(&d3d.context, &frame.texture);
+            Ok(texture)
+        }
+        _ => SourceTexture::black(&d3d.device, width, height),
     }
 }

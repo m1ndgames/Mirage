@@ -9,7 +9,6 @@ mod renderer;
 mod window;
 
 use anyhow::anyhow;
-use windows::Win32::Foundation::WAIT_OBJECT_0;
 use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
 use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 use windows::Win32::UI::WindowsAndMessaging::{MsgWaitForMultipleObjectsEx, MWMO_INPUTAVAILABLE, QS_ALLINPUT};
@@ -59,38 +58,40 @@ fn main() -> anyhow::Result<()> {
     let d3d = d3d::create_for_monitor(src.handle)?;
     println!("rendering on: {}", d3d.adapter_name);
 
-    let output = window::create(tgt.x, tgt.y, tgt.width, tgt.height)?;
-    let mut renderer = renderer::Renderer::new(&d3d, output.hwnd, output.width as u32, output.height as u32)?;
+    let output = window::create_output_window(tgt.x, tgt.y, tgt.width, tgt.height)?;
+    let pipeline = renderer::Pipeline::new(&d3d)?;
+    let target = renderer::SwapChainTarget::new(&d3d, output.hwnd, output.width as u32, output.height as u32)?;
     let mut capture = capture::MonitorCapture::new(d3d.winrt_device()?, src.handle)?;
+    let mut source: Option<renderer::SourceTexture> = None;
     println!("capturing – Ctrl+C to quit");
 
-    // Event driven: sleep until WGC signals a frame or a window message arrives,
-    // then present exactly once per newest frame. Presenting is never paced by
-    // Present() blocking – on this machine it doesn't (see PLAN.md, M0 results).
     let mut stats = Stats::new();
     loop {
-        let wait = unsafe {
+        let _ = unsafe {
             MsgWaitForMultipleObjectsEx(Some(&[capture.frame_event()]), 1000, QS_ALLINPUT, MWMO_INPUTAVAILABLE)
         };
         if !window::pump_messages() {
             break;
         }
-        if wait == WAIT_OBJECT_0 {
-            // Drain the pool so a slow target only ever shows the newest frame.
-            let mut newest = None;
-            while let Some(frame) = capture.try_next_frame()? {
-                newest = Some(frame);
-                stats.captured += 1;
+        let mut newest = None;
+        while let Some(frame) = capture.try_next_frame()? {
+            newest = Some(frame);
+            stats.captured += 1;
+        }
+        if let Some(frame) = newest {
+            let (fw, fh) = (frame.width as u32, frame.height as u32);
+            if source.as_ref().map_or(true, |s| s.width != fw || s.height != fh) {
+                source = Some(renderer::SourceTexture::new(&d3d.device, fw, fh)?);
             }
-            if let Some(frame) = newest {
-                renderer.wait_for_frame_slot();
-                renderer.ensure_source(frame.width as u32, frame.height as u32)?;
-                renderer.copy_frame(&frame.texture);
-                let (w, h) = capture.size();
-                renderer.draw(rect.clamp_to(w, h).to_uv(w, h))?;
-                renderer.present()?;
-                stats.presented += 1;
-            }
+            let src_tex = source.as_ref().expect("just created");
+            src_tex.copy_from(&d3d.context, &frame.texture);
+            let (w, h) = capture.size();
+            target.wait_for_frame_slot();
+            target.clear(&d3d.context);
+            let dst = Rect { x: 0, y: 0, w: output.width, h: output.height };
+            pipeline.draw_mirror(&d3d.context, src_tex, rect.clamp_to(w, h).to_uv(w, h), dst);
+            target.present()?;
+            stats.presented += 1;
         }
         stats.report_if_due();
     }
