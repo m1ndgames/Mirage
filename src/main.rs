@@ -1,7 +1,9 @@
 mod args;
 mod capture;
+mod config;
 mod d3d;
 mod geometry;
+mod identity;
 mod monitors;
 mod renderer;
 mod window;
