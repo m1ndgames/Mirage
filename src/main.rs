@@ -1,4 +1,5 @@
 mod args;
+mod d3d;
 mod geometry;
 mod monitors;
 
@@ -33,5 +34,8 @@ fn main() -> anyhow::Result<()> {
         "source {} ({}x{})  ->  target {} at {},{} ({}x{})  crop {:?}",
         src.device_name, src.width, src.height, tgt.device_name, tgt.x, tgt.y, tgt.width, tgt.height, rect
     );
+
+    let d3d = d3d::create_for_monitor(src.handle)?;
+    println!("rendering on: {}", d3d.adapter_name);
     Ok(())
 }
