@@ -18,11 +18,25 @@ pub struct App {
     error: Option<String>,
     notice: Option<String>,
     dirty: bool,
+    /// Text of the profile name box (new / rename).
+    profile_name: String,
 }
 
 impl App {
     pub fn new(config: Config, path: PathBuf, engine: EngineHandle, events: Receiver<Event>, notice: Option<String>) -> Self {
-        App { config, path, engine: Some(engine), events, attached: Vec::new(), selected: None, error: None, notice, dirty: false }
+        let profile_name = config.active_profile.clone();
+        App {
+            config,
+            path,
+            engine: Some(engine),
+            events,
+            attached: Vec::new(),
+            selected: None,
+            error: None,
+            notice,
+            dirty: false,
+            profile_name,
+        }
     }
 
     fn send(&self, command: Command) {
@@ -120,6 +134,91 @@ impl App {
         });
     }
 
+    fn profiles_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Profile");
+        let names: Vec<String> = self.config.profiles.iter().map(|p| p.name.clone()).collect();
+        let mut active = self.config.active_profile.clone();
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt("profile").selected_text(active.clone()).show_ui(ui, |ui| {
+                for n in &names {
+                    ui.selectable_value(&mut active, n.clone(), n);
+                }
+            });
+            if active != self.config.active_profile {
+                self.config.active_profile = active.clone();
+                self.profile_name = active;
+                self.selected = None;
+                self.dirty = true;
+            }
+            ui.add_space(12.0);
+            ui.add(egui::TextEdit::singleline(&mut self.profile_name).desired_width(140.0));
+            if ui.button("New").clicked() {
+                let name = self.config.add_profile(&self.profile_name);
+                self.profile_name = name;
+                self.selected = None;
+                self.dirty = true;
+            }
+            if ui.button("Rename").clicked() {
+                match self.config.rename_active_profile(&self.profile_name) {
+                    Ok(()) => self.dirty = true,
+                    Err(e) => self.error = Some(e),
+                }
+            }
+            if ui.button("Delete").clicked() {
+                match self.config.remove_active_profile() {
+                    Ok(()) => {
+                        self.profile_name = self.config.active_profile.clone();
+                        self.selected = None;
+                        self.dirty = true;
+                    }
+                    Err(e) => self.error = Some(e),
+                }
+            }
+        });
+    }
+
+    /// Target-area control: presets for tiling plus a custom entry in percent.
+    fn area_row(&mut self, ui: &mut egui::Ui, i: usize) {
+        let m = &mut self.config.active_profile_mut().mappings[i];
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            ui.add_space(24.0);
+            ui.label("area");
+            let current = AREA_PRESETS.iter().find(|(_, a)| area_eq(a, &m.target_area)).map(|(n, _)| *n).unwrap_or("custom");
+            let mut choice = current;
+            egui::ComboBox::from_id_salt(("area", i)).selected_text(current).show_ui(ui, |ui| {
+                for (name, _) in AREA_PRESETS {
+                    ui.selectable_value(&mut choice, name, *name);
+                }
+                ui.selectable_value(&mut choice, "custom", "custom");
+            });
+            if choice != current {
+                m.target_area = match AREA_PRESETS.iter().find(|(n, _)| *n == choice) {
+                    Some((_, a)) => a.to_vec(),
+                    None => vec![0.0, 0.0, 1.0, 1.0],
+                };
+                changed = true;
+            }
+            if choice == "custom" {
+                if m.target_area.len() != 4 {
+                    m.target_area = vec![0.0, 0.0, 1.0, 1.0];
+                    changed = true;
+                }
+                for (k, label) in ["x", "y", "w", "h"].iter().enumerate() {
+                    ui.label(*label);
+                    let mut pct = m.target_area[k] * 100.0;
+                    if ui.add(egui::DragValue::new(&mut pct).range(0.0..=100.0).suffix("%").speed(1.0)).changed() {
+                        m.target_area[k] = (pct / 100.0).clamp(0.0, 1.0);
+                        changed = true;
+                    }
+                }
+            }
+        });
+        if changed {
+            self.dirty = true;
+        }
+    }
+
     fn mappings_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Mappings");
         let statuses = config::resolve(self.config.active_profile(), &self.attached);
@@ -192,6 +291,7 @@ impl App {
                 }
             });
             self.transform_row(ui, i);
+            self.area_row(ui, i);
             ui.add_space(4.0);
         }
         if let Some(i) = remove {
@@ -249,6 +349,25 @@ impl App {
     }
 }
 
+/// Tiling presets as fractions of the target monitor: name → [x, y, w, h].
+const AREA_PRESETS: &[(&str, &[f32])] = &[
+    ("whole", &[]),
+    ("top half", &[0.0, 0.0, 1.0, 0.5]),
+    ("bottom half", &[0.0, 0.5, 1.0, 0.5]),
+    ("left half", &[0.0, 0.0, 0.5, 1.0]),
+    ("right half", &[0.5, 0.0, 0.5, 1.0]),
+    ("top-left quarter", &[0.0, 0.0, 0.5, 0.5]),
+    ("top-right quarter", &[0.5, 0.0, 0.5, 0.5]),
+    ("bottom-left quarter", &[0.0, 0.5, 0.5, 0.5]),
+    ("bottom-right quarter", &[0.5, 0.5, 0.5, 0.5]),
+];
+
+/// Preset match. "whole" is only the empty list; an explicit 0/0/100/100 is a
+/// custom area the user may still be editing.
+fn area_eq(a: &[f32], b: &[f32]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-4)
+}
+
 fn fit_name(fit: Fit) -> &'static str {
     match fit {
         Fit::Fit => "fit (letterbox)",
@@ -287,6 +406,8 @@ impl eframe::App for App {
         });
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
+                self.profiles_panel(ui);
+                ui.separator();
                 self.monitors_panel(ui);
                 ui.separator();
                 self.mappings_panel(ui);

@@ -114,8 +114,8 @@ A **Profile** is a list of **Mappings** plus an optional process name for auto-a
 
 Mapping:
 - `source`: monitor id + rect (physical pixels)
-- `target`: monitor id + rect (default: whole monitor). A sub-rect allows several mappings to be tiled on
-  one small screen (e.g. left and right MFD side by side).
+- `target`: monitor id + `target_area` as fractions `[x, y, w, h]` of the monitor (empty = whole). A
+  sub-area allows several mappings to be tiled on one small screen (e.g. left and right MFD side by side).
 - `flip_h`, `flip_v`, `rotation` (0/90/180/270, clockwise), `fit` (`stretch` / `fit` = letterbox /
   `fill` = crop to aspect, default `fit`), `filter` (`linear` / `nearest`, default `linear`)
 
@@ -225,7 +225,10 @@ label: name + serial suffix.
   mapping (crop, flips, rotation and fill-crop folded in, `transform::layout`, 11 unit tests); `fit`
   shrinks the viewport, `fill` crops the source; two sampler states for linear/nearest. Default is
   `fit` (letterbox) – the user's choice. UI: a second row per mapping.
-- **M3 – Profiles:** config file, several mappings per profile, tiling on one target.
+- **M3 – Profiles:** config file, several mappings per profile, tiling on one target. **Done 2026-09-21.**
+  Profile bar (switch / new / rename / delete), `target_area` as fractions of the target monitor with
+  tiling presets (halves, quarters) and a custom percent entry. Fractions instead of pixels so a tile
+  survives a resolution change of the target.
 - **M4 – Polish:** tray icon, hotkeys, autostart, process-based profile switching.
 
 ### M0 results (2026-09-21)
