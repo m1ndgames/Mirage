@@ -1,4 +1,5 @@
 mod args;
+mod capture;
 mod d3d;
 mod geometry;
 mod monitors;
@@ -41,12 +42,18 @@ fn main() -> anyhow::Result<()> {
     println!("rendering on: {}", d3d.adapter_name);
 
     let output = window::create(tgt.x, tgt.y, tgt.width, tgt.height)?;
-    let renderer = renderer::Renderer::new(&d3d, output.hwnd, output.width as u32, output.height as u32)?;
-    println!("output window up – Ctrl+C to quit");
+    let mut renderer = renderer::Renderer::new(&d3d, output.hwnd, output.width as u32, output.height as u32)?;
+    let mut capture = capture::MonitorCapture::new(d3d.winrt_device()?, src.handle)?;
+    println!("capturing – Ctrl+C to quit");
 
     while window::pump_messages() {
         renderer.wait_for_frame_slot();
-        renderer.draw([0.0, 0.0, 1.0, 1.0])?;
+        if let Some(frame) = capture.try_next_frame()? {
+            renderer.ensure_source(frame.width as u32, frame.height as u32)?;
+            renderer.copy_frame(&frame.texture);
+        }
+        let (w, h) = capture.size();
+        renderer.draw(rect.clamp_to(w, h).to_uv(w, h))?;
         renderer.present()?;
     }
     Ok(())
