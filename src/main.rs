@@ -2,6 +2,8 @@ mod args;
 mod d3d;
 mod geometry;
 mod monitors;
+mod renderer;
+mod window;
 
 use anyhow::anyhow;
 use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
@@ -37,5 +39,15 @@ fn main() -> anyhow::Result<()> {
 
     let d3d = d3d::create_for_monitor(src.handle)?;
     println!("rendering on: {}", d3d.adapter_name);
+
+    let output = window::create(tgt.x, tgt.y, tgt.width, tgt.height)?;
+    let renderer = renderer::Renderer::new(&d3d, output.hwnd, output.width as u32, output.height as u32)?;
+    println!("output window up – Ctrl+C to quit");
+
+    while window::pump_messages() {
+        renderer.wait_for_frame_slot();
+        renderer.draw([0.0, 0.0, 1.0, 1.0])?;
+        renderer.present()?;
+    }
     Ok(())
 }
