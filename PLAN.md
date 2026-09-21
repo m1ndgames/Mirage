@@ -54,14 +54,19 @@ they do not block user-mode compositor capture (OBS works), but any process inte
   - Disable the yellow capture border: `GraphicsCaptureAccess::RequestAccessAsync(Borderless)` then
     `session.IsBorderRequired = false` (Windows 11).
   - Exclude the cursor: `session.IsCursorCaptureEnabled = false`.
-  - Evaluate the `windows-capture` crate vs. calling WinRT directly.
-  - **Fallback candidate: DXGI Desktop Duplication.** Never draws a border, older and simpler API, but
-    needs re-initialisation on desktop switches (UAC, lock screen) and has driver-specific quirks.
-    Decide after M0 measurements.
+  - WinRT is called directly through the `windows` crate (decided in M0 – the capture code is ~100
+    lines and needs to share Mirage's own D3D11 device, which wrapper crates don't allow).
+  - Desktop Duplication is **not** needed: WGC delivered the border-free, cursor-free, 120 Hz capture
+    M0 asked for (see *M0 results*). Revisit only if a specific game breaks WGC.
 - **Rendering: Direct3D 11.** One full-screen quad per mapping; a transform matrix in the vertex shader
   handles crop, mirror, rotation and fit mode in a single pass. Flip-model swap chain
-  (`DXGI_SWAP_EFFECT_FLIP_DISCARD`), vsync to the target monitor. Borderless window – **not** exclusive
-  full-screen.
+  (`DXGI_SWAP_EFFECT_FLIP_DISCARD`) on a borderless window – **not** exclusive full-screen.
+- **Pacing is event driven, never vsync driven.** The render thread sleeps on the WGC `FrameArrived`
+  event (`MsgWaitForMultipleObjectsEx` together with the window's message queue) and presents exactly
+  once per newest captured frame. M0 showed that neither `Present(1)` nor the frame-latency waitable
+  block on the dev machine – in any window placement, on any monitor – so a loop that relies on them
+  spins at ~10 000 iterations/s. Present rate therefore equals the source's change rate, and an idle
+  desktop costs nothing.
 - **Output window:** raw Win32 via `windows` crate. Borderless, sized to the target monitor's bounds,
   `WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` (always on top, never takes focus, hidden from Alt-Tab).
 - **DisplayLink target.** The cockpit screen sits behind an Indirect Display Driver: there is no GPU behind
@@ -72,7 +77,8 @@ they do not block user-mode compositor capture (OBS works), but any process inte
     for a window positioned on the DisplayLink monitor is the normal case; DWM handles the hand-over.
   - Exclusive full-screen is impossible there anyway – another reason for the borderless approach.
   - DisplayLink adds its own latency (read-back + compression + USB), outside our control. Mirage's own
-    pipeline budget is 1–2 frames; total latency gets measured in M0.
+    pipeline is one copy and one draw per captured frame; the M0 spike showed no perceptible end-to-end
+    latency on the cockpit screen.
   - Its refresh rate is 60 Hz regardless of the source monitor.
 - **UI: egui / eframe** for the settings window *and* the region-selection overlay.
   - Pure Rust, actively maintained, fastest to iterate; the settings UI is small (profiles, mappings,
@@ -93,7 +99,7 @@ they do not block user-mode compositor capture (OBS works), but any process inte
 capture   WGC session per source monitor → ID3D11Texture2D per frame (FrameArrived callback thread)
 output    one Win32 window + D3D11 swap chain per target monitor; draws all mappings for that monitor
 overlay   egui viewport: frozen frame + drag-select → returns a source rect in physical pixels
-config    profiles / mappings, TOML load & save, monitor identity by device path
+config    profiles / mappings, TOML load & save, monitor identity by EDID / parent-device serial
 app       eframe settings window, tray icon, global hotkeys, foreground-process watcher for profile switching
 ```
 
@@ -209,7 +215,7 @@ label: name + serial suffix.
   full-screen present on monitor B. No UI, no config. Any second monitor works for development; the
   WinCtrl screen is only needed for the final check.
   Success criteria: runs alongside WarDogs (Elytra) and DCS/MSFS without anti-cheat complaints, latency
-  feels fine, GPU overhead is negligible, works on the WinCtrl screen.
+  feels fine, GPU overhead is negligible, works on the WinCtrl screen. **Done 2026-09-21, see below.**
 - **M1 – Region selection:** egui settings window + overlay on a frozen frame, choose source and target
   monitor. Includes monitor enumeration with stable identity and hot-plug handling from the start – the
   picker must survive unplugging the cockpit screen while Mirage is running.
@@ -217,9 +223,40 @@ label: name + serial suffix.
 - **M3 – Profiles:** config file, several mappings per profile, tiling on one target.
 - **M4 – Polish:** tray icon, hotkeys, autostart, process-based profile switching.
 
+### M0 results (2026-09-21)
+
+Spike lives in `src/` (`cargo run -- --help` style usage: `--list`, `--source N`, `--target N`,
+`--rect X,Y,W,H`). Release binary 276 KB, no dependencies beyond Windows.
+
+- **Anti-cheat: WarDogs (Elytra, kernel-level) – pass.** 10+ minutes on an official server in both
+  orders (Mirage before the game, Mirage started mid-session with `--rect 0,1040,400,400` on the
+  mini-map). No warning, no kick, no launch refusal; the game kept keyboard and mouse throughout.
+  DCS/MSFS skipped by decision – they are far less restrictive than Elytra.
+- **Latency:** not measurable by eye on the cockpit screen; no photo measurement was needed.
+- **GPU cost:** no observable difference in Task Manager with the game running.
+- **Capture:** WGC monitor capture at the source's full 120 Hz, no cursor, and
+  `GraphicsCaptureAccess::RequestAccessAsync(Borderless)` returned `Allowed` – no yellow border on
+  Windows 11 for an unpackaged app. Source resolution changes (2560×1440 → 1920×1080 → back) are
+  handled by recreating the frame pool; verified live.
+- **DXGI adapters seen:** the RTX 5070 Ti appears **twice** – adapter 0 with 4 outputs (all three HPs
+  *and* the DisplayLink screen), adapter 1 with 0 outputs – plus the software "Microsoft Basic Render
+  Driver". There is no separately named DisplayLink adapter; the IDD attaches its monitor as an output
+  of the real GPU. "Owner of the source monitor" selection picked adapter 0 correctly. The adapter
+  enumeration must keep skipping zero-output duplicates.
+- **Present does not pace.** `Present(1)` returned `S_OK` instantly at ~12 000 calls/s, the
+  frame-latency waitable was permanently signalled, and a 1-px-short window (forcing DWM composition)
+  behaved the same, on the DisplayLink screen *and* on an HP monitor. Root cause not pinned down (VRR
+  primary at 120 Hz and/or driver vsync override are the suspects) – irrelevant, because the fix is
+  the event-driven loop described under *Technical decisions*, which is the better design anyway.
+- **`\\.\DISPLAYn` names are not stable even within a session:** enabling two monitors while Mirage
+  was running swapped the GDI names of the primary and a secondary HP. Confirms the *Monitor identity*
+  plan; nothing may ever key on those names.
+- **Crop verified pixel-exact** by screenshotting the source quarter and the cockpit screen and
+  comparing them. The 16:9 → 3:4 squash makes a correct crop *look* shifted – fit modes (M2) will
+  fix the perception.
+
 ## Open questions
 
-- **WGC vs. Desktop Duplication:** decide after M0 (latency, border, robustness).
 - **egui overlay positioning on mixed-DPI setups:** verify in M1; fall back to raw Win32 if needed.
 
 ## Non-goals
