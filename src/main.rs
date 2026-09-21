@@ -24,11 +24,25 @@ fn main() -> anyhow::Result<()> {
     unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) }?;
     unsafe { RoInitialize(RO_INIT_MULTITHREADED) }?;
 
-    let monitors = monitors::enumerate()?;
-    print!("{}", monitors::describe(&monitors));
+    let attached = identity::attached()?;
+    println!("idx  id                                   name             gdi           size       primary");
+    for (i, m) in attached.iter().enumerate() {
+        println!(
+            "{:<4} {:<36} {:<16} {:<13} {:>5}x{:<5} {}{}",
+            i,
+            m.id,
+            m.friendly_name,
+            m.gdi_name,
+            m.info.width,
+            m.info.height,
+            if m.info.is_primary { "primary" } else { "" },
+            if m.port_bound { " (port-bound)" } else { "" }
+        );
+    }
     if args.list {
         return Ok(());
     }
+    let monitors: Vec<monitors::MonitorInfo> = attached.iter().map(|m| m.info.clone()).collect();
 
     let source = monitors::choose_source(&monitors, args.source).map_err(|e| anyhow!(e))?;
     let target = monitors::choose_target(&monitors, args.target, source).map_err(|e| anyhow!(e))?;
