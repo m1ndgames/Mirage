@@ -1,10 +1,12 @@
 pub const USAGE: &str = "\
-usage: mirage [--list]
-  --list        print the monitors Windows currently sees, with their identities, and exit";
+usage: mirage [--list] [--minimized]
+  --list        print the monitors Windows currently sees, with their identities, and exit
+  --minimized   start hidden in the tray (what the autostart entry uses)";
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Args {
     pub list: bool,
+    pub minimized: bool,
 }
 
 impl Args {
@@ -13,6 +15,7 @@ impl Args {
         for flag in iter {
             match flag.as_str() {
                 "--list" => args.list = true,
+                "--minimized" => args.minimized = true,
                 other => return Err(format!("unknown argument '{other}'")),
             }
         }
@@ -34,8 +37,9 @@ mod tests {
     }
 
     #[test]
-    fn parses_list() {
-        assert_eq!(parse("--list"), Ok(Args { list: true }));
+    fn parses_flags() {
+        assert_eq!(parse("--list"), Ok(Args { list: true, minimized: false }));
+        assert_eq!(parse("--minimized --list"), Ok(Args { list: true, minimized: true }));
     }
 
     #[test]

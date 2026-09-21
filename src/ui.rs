@@ -3,6 +3,7 @@ use std::sync::mpsc::Receiver;
 
 use eframe::egui;
 
+use crate::autostart;
 use crate::config::{self, Config, Mapping, MonitorRef, Resolved};
 use crate::transform::{Filter, Fit};
 use crate::engine::{Command, EngineHandle, Event, RegionSelected};
@@ -20,11 +21,29 @@ pub struct App {
     dirty: bool,
     /// Text of the profile name box (new / rename).
     profile_name: String,
+    /// Hotkey text being edited; applied when the box loses focus.
+    hotkey_text: String,
+    /// Mirrors the registry Run entry; read once at start.
+    autostart: bool,
+    /// Set by the tray's Quit: the next close request really closes.
+    quitting: bool,
+    /// Pending viewport requests raised from `logic()` (which may run hidden).
+    show_requested: bool,
+    /// `--minimized` / start_minimized: hide the window on the first pass.
+    hide_requested: bool,
 }
 
 impl App {
-    pub fn new(config: Config, path: PathBuf, engine: EngineHandle, events: Receiver<Event>, notice: Option<String>) -> Self {
+    pub fn new(
+        config: Config,
+        path: PathBuf,
+        engine: EngineHandle,
+        events: Receiver<Event>,
+        notice: Option<String>,
+        start_hidden: bool,
+    ) -> Self {
         let profile_name = config.active_profile.clone();
+        let hotkey_text = config.select_region_hotkey.clone();
         App {
             config,
             path,
@@ -36,6 +55,11 @@ impl App {
             notice,
             dirty: false,
             profile_name,
+            hotkey_text,
+            autostart: autostart::is_enabled(),
+            quitting: false,
+            show_requested: false,
+            hide_requested: start_hidden,
         }
     }
 
@@ -56,6 +80,8 @@ impl App {
                 }
                 Event::RegionSelected(r) => self.apply_selection(r),
                 Event::SelectionCancelled => {}
+                Event::ShowSettings => self.show_requested = true,
+                Event::Quit => self.quitting = true,
                 Event::Error(e) => self.error = Some(e),
             }
         }
@@ -132,6 +158,39 @@ impl App {
                 ui.end_row();
             }
         });
+    }
+
+    fn general_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("General");
+        ui.horizontal(|ui| {
+            ui.label("Select-region hotkey");
+            let response = ui.add(egui::TextEdit::singleline(&mut self.hotkey_text).desired_width(120.0));
+            let commit = response.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if commit && self.hotkey_text.trim() != self.config.select_region_hotkey {
+                match crate::hotkey::parse(&self.hotkey_text) {
+                    Some(_) => {
+                        self.config.select_region_hotkey = self.hotkey_text.trim().to_string();
+                        self.dirty = true;
+                    }
+                    None => {
+                        self.error = Some(format!("'{}' is not a valid hotkey – e.g. Ctrl+Shift+R or F9", self.hotkey_text));
+                        self.hotkey_text = self.config.select_region_hotkey.clone();
+                    }
+                }
+            }
+            ui.add_space(12.0);
+            if ui.checkbox(&mut self.config.start_minimized, "Start minimized to tray").changed() {
+                self.dirty = true;
+            }
+            let mut autostart = self.autostart;
+            if ui.checkbox(&mut autostart, "Start with Windows").changed() {
+                match autostart::set(autostart) {
+                    Ok(()) => self.autostart = autostart,
+                    Err(e) => self.error = Some(format!("autostart: {e:#}")),
+                }
+            }
+        });
+        ui.weak("Closing the window keeps Mirage running in the tray; use the tray menu to quit.");
     }
 
     fn profiles_panel(&mut self, ui: &mut egui::Ui) {
@@ -384,8 +443,43 @@ fn filter_name(filter: Filter) -> &'static str {
 }
 
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    /// Runs before every frame *and* while the window is hidden (whenever the
+    /// engine requests a repaint), so events and saves never wait for the UI.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.hide_requested {
+            // eframe 0.36 ignores ViewportBuilder::with_visible(false); hide here instead.
+            self.hide_requested = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
         self.drain_events();
+        if self.show_requested {
+            self.show_requested = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+        if self.quitting {
+            // A hidden eframe window ignores ViewportCommand::Close, so end the
+            // process ourselves once the render thread has torn everything down.
+            if let Some(engine) = self.engine.take() {
+                engine.shutdown();
+            }
+            std::process::exit(0);
+        }
+        if self.dirty {
+            self.dirty = false;
+            if let Err(e) = self.config.save(&self.path) {
+                self.error = Some(format!("saving config failed: {e:#}"));
+            }
+            self.send(Command::Apply(self.config.clone()));
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Close button → hide to tray. Only the tray's Quit really closes.
+        if ui.ctx().input(|i| i.viewport().close_requested()) && !self.quitting {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
         egui::Panel::top("bar").show(ui, |ui| {
             if let Some(e) = self.error.clone() {
                 ui.horizontal(|ui| {
@@ -406,6 +500,8 @@ impl eframe::App for App {
         });
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
+                self.general_panel(ui);
+                ui.separator();
                 self.profiles_panel(ui);
                 ui.separator();
                 self.monitors_panel(ui);
@@ -413,13 +509,6 @@ impl eframe::App for App {
                 self.mappings_panel(ui);
             });
         });
-        if self.dirty {
-            self.dirty = false;
-            if let Err(e) = self.config.save(&self.path) {
-                self.error = Some(format!("saving config failed: {e:#}"));
-            }
-            self.send(Command::Apply(self.config.clone()));
-        }
     }
 }
 

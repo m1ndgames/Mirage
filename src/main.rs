@@ -1,4 +1,7 @@
+#![windows_subsystem = "windows"]
+
 mod args;
+mod autostart;
 mod capture;
 mod config;
 mod d3d;
@@ -17,12 +20,29 @@ use std::sync::mpsc::channel;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use windows::core::HSTRING;
+use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
 use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
+use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
 
 use crate::config::Config;
 use crate::engine::{Command, Event};
 
-fn main() -> anyhow::Result<()> {
+fn main() {
+    // No console of our own (windows subsystem); borrow the parent's for CLI output.
+    unsafe {
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+    if let Err(e) = run() {
+        eprintln!("{e:#}");
+        unsafe {
+            MessageBoxW(None, &HSTRING::from(format!("{e:#}")), &HSTRING::from("Mirage"), MB_OK | MB_ICONERROR);
+        }
+        std::process::exit(1);
+    }
+}
+
+fn run() -> anyhow::Result<()> {
     let args = args::Args::parse(std::env::args().skip(1)).map_err(|e| anyhow!("{e}\n\n{}", args::USAGE))?;
 
     // Must happen before any monitor enumeration or window creation.
@@ -50,8 +70,11 @@ fn main() -> anyhow::Result<()> {
     let config = loaded.config;
     let notice = loaded.notice;
 
+    let start_hidden = args.minimized || config.start_minimized;
     let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default().with_inner_size([620.0, 480.0]).with_title("Mirage"),
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_inner_size([640.0, 560.0])
+            .with_title("Mirage"),
         ..Default::default()
     };
     eframe::run_native(
@@ -62,7 +85,7 @@ fn main() -> anyhow::Result<()> {
             let (event_tx, event_rx) = channel::<Event>();
             let engine = engine::spawn(event_tx, Arc::new(move || ctx.request_repaint()))?;
             engine.send(Command::Apply(config.clone()));
-            Ok(Box::new(ui::App::new(config, path, engine, event_rx, notice)))
+            Ok(Box::new(ui::App::new(config, path, engine, event_rx, notice, start_hidden)))
         }),
     )
     .map_err(|e| anyhow!("{e}"))

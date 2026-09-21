@@ -126,14 +126,12 @@ impl Mapping {
 #[serde(default)]
 pub struct Profile {
     pub name: String,
-    /// M4: executable name that auto-activates this profile. Empty = never.
-    pub process: String,
     pub mappings: Vec<Mapping>,
 }
 
 impl Default for Profile {
     fn default() -> Self {
-        Profile { name: "default".into(), process: String::new(), mappings: Vec::new() }
+        Profile { name: "default".into(), mappings: Vec::new() }
     }
 }
 
@@ -144,6 +142,8 @@ pub struct Config {
     pub active_profile: String,
     pub last_target: Option<MonitorId>,
     pub select_region_hotkey: String,
+    /// Start hidden in the tray instead of showing the settings window.
+    pub start_minimized: bool,
     pub monitors: Vec<KnownMonitor>,
     pub profiles: Vec<Profile>,
 }
@@ -155,6 +155,7 @@ impl Default for Config {
             active_profile: "default".into(),
             last_target: None,
             select_region_hotkey: crate::hotkey::DEFAULT.into(),
+            start_minimized: false,
             monitors: Vec::new(),
             profiles: vec![Profile::default()],
         }

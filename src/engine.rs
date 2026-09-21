@@ -19,7 +19,7 @@ use crate::identity::{self, AttachedMonitor, MonitorId};
 use crate::overlay::{Outcome, Selection};
 use crate::renderer::{Pipeline, SourceTexture, SwapChainTarget};
 use crate::transform;
-use crate::window::{self, OutputWindow, WindowSignals};
+use crate::window::{self, OutputWindow, TrayAction, WindowSignals};
 
 pub enum Command {
     Apply(Config),
@@ -40,6 +40,10 @@ pub enum Event {
     MonitorsChanged(Vec<AttachedMonitor>),
     RegionSelected(RegionSelected),
     SelectionCancelled,
+    /// The user clicked the tray icon or picked "Settings" in its menu.
+    ShowSettings,
+    /// The user picked "Quit" in the tray menu.
+    Quit,
     Error(String),
 }
 
@@ -138,6 +142,9 @@ fn run(rx: Receiver<Command>, wake: isize, events: Sender<Event>, repaint: Arc<d
     unsafe { RoInitialize(RO_INIT_MULTITHREADED) }?;
     let signals = Box::new(WindowSignals::default());
     let message_hwnd = window::create_message_window(&*signals as *const WindowSignals)?;
+    if let Err(e) = window::add_tray_icon(message_hwnd) {
+        let _ = events.send(Event::Error(format!("tray icon unavailable: {e:#}")));
+    }
     // The device is created for whatever is primary now; a primary on another
     // GPU would need a rebuild of the device – not supported (PLAN.md: one GPU).
     let primary = identity::attached()?.into_iter().find(|m| m.info.is_primary).context("no primary monitor")?;
@@ -179,6 +186,7 @@ fn run(rx: Receiver<Command>, wake: isize, events: Sender<Event>, repaint: Arc<d
                 Ok(Command::SelectRegion) => engine.start_selection(),
                 Ok(Command::Shutdown) | Err(TryRecvError::Disconnected) => {
                     engine.outputs.clear();
+                    window::remove_tray_icon(engine.message_hwnd);
                     unsafe {
                         let _ = DestroyWindow(engine.message_hwnd);
                     }
@@ -192,6 +200,12 @@ fn run(rx: Receiver<Command>, wake: isize, events: Sender<Event>, repaint: Arc<d
         }
         if engine.signals.hotkey.take() {
             engine.start_selection();
+        }
+        match engine.signals.tray.take() {
+            Some(TrayAction::ShowSettings) => engine.emit(Event::ShowSettings),
+            Some(TrayAction::SelectRegion) => engine.start_selection(),
+            Some(TrayAction::Quit) => engine.emit(Event::Quit),
+            None => {}
         }
         engine.pump_frames();
         engine.present_dirty();
