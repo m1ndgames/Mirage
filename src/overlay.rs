@@ -66,12 +66,21 @@ pub struct Selection {
 impl Selection {
     /// Freezes every attached monitor and covers it with an overlay.
     pub fn start(d3d: &D3d, attached: &[AttachedMonitor]) -> anyhow::Result<Selection> {
-        let shared = Box::new(Shared { anchor: Cell::new(None), current: Cell::new(None), outcome: Cell::new(None) });
+        let shared = Box::new(Shared {
+            anchor: Cell::new(None),
+            current: Cell::new(None),
+            outcome: Cell::new(None),
+        });
         let mut windows = Vec::new();
         for (index, m) in attached.iter().enumerate() {
             let info = &m.info;
             let frame = capture::grab_one_frame(d3d, info.handle, info.width as u32, info.height as u32, 1000)?;
-            let ctx = Box::new(WindowCtx { shared: &*shared as *const Shared, index, width: info.width, height: info.height });
+            let ctx = Box::new(WindowCtx {
+                shared: &*shared as *const Shared,
+                index,
+                width: info.width,
+                height: info.height,
+            });
             let hwnd = window::create_overlay_window(
                 info.x,
                 info.y,
@@ -81,7 +90,14 @@ impl Selection {
                 Some(overlay_proc),
             )?;
             let target = SwapChainTarget::new(d3d, hwnd, info.width as u32, info.height as u32)?;
-            windows.push(OverlayWindow { hwnd, target, frame, index, _ctx: ctx, last_drawn: None });
+            windows.push(OverlayWindow {
+                hwnd,
+                target,
+                frame,
+                index,
+                _ctx: ctx,
+                last_drawn: None,
+            });
         }
         for w in &windows {
             unsafe {
@@ -123,7 +139,13 @@ impl Selection {
 fn normalised(ax: i32, ay: i32, x: i32, y: i32, width: i32, height: i32) -> Rect {
     let (x0, x1) = (ax.min(x), ax.max(x));
     let (y0, y1) = (ay.min(y), ay.max(y));
-    Rect { x: x0, y: y0, w: (x1 - x0).max(1), h: (y1 - y0).max(1) }.clamp_to(width, height)
+    Rect {
+        x: x0,
+        y: y0,
+        w: (x1 - x0).max(1),
+        h: (y1 - y0).max(1),
+    }
+    .clamp_to(width, height)
 }
 
 unsafe extern "system" fn overlay_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -149,7 +171,9 @@ unsafe extern "system" fn overlay_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpa
                 if let Some((i, ax, ay)) = shared.anchor.get() {
                     if i == ctx.index {
                         let (x, y) = window::mouse_pos(lparam);
-                        shared.current.set(Some((i, normalised(ax, ay, x, y, ctx.width, ctx.height))));
+                        shared
+                            .current
+                            .set(Some((i, normalised(ax, ay, x, y, ctx.width, ctx.height))));
                     }
                 }
                 LRESULT(0)

@@ -89,16 +89,32 @@ pub fn area_to_rect(area: &[f32], width: i32, height: i32) -> Rect {
     match area {
         [x, y, w, h] if *w > 0.0 && *h > 0.0 => {
             let px = |f: f32, size: i32| (f as f64 * size as f64).round() as i32;
-            Rect { x: px(*x, width), y: px(*y, height), w: px(*w, width).max(1), h: px(*h, height).max(1) }
-                .clamp_to(width, height)
+            Rect {
+                x: px(*x, width),
+                y: px(*y, height),
+                w: px(*w, width).max(1),
+                h: px(*h, height).max(1),
+            }
+            .clamp_to(width, height)
         }
-        _ => Rect { x: 0, y: 0, w: width, h: height },
+        _ => Rect {
+            x: 0,
+            y: 0,
+            w: width,
+            h: height,
+        },
     }
 }
 
 impl Mapping {
     pub fn transform(&self) -> Transform {
-        Transform { flip_h: self.flip_h, flip_v: self.flip_v, rotation: self.rotation, fit: self.fit, filter: self.filter }
+        Transform {
+            flip_h: self.flip_h,
+            flip_v: self.flip_v,
+            rotation: self.rotation,
+            fit: self.fit,
+            filter: self.filter,
+        }
     }
 
     /// The source rect for the monitor's current size: scaled proportionally if
@@ -131,7 +147,10 @@ pub struct Profile {
 
 impl Default for Profile {
     fn default() -> Self {
-        Profile { name: "default".into(), mappings: Vec::new() }
+        Profile {
+            name: "default".into(),
+            mappings: Vec::new(),
+        }
     }
 }
 
@@ -181,7 +200,12 @@ impl Config {
     pub fn load(path: &Path) -> Loaded {
         let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
-            Err(_) => return Loaded { config: Config::default(), notice: None },
+            Err(_) => {
+                return Loaded {
+                    config: Config::default(),
+                    notice: None,
+                }
+            }
         };
         match toml::from_str::<Config>(&text) {
             Ok(config) => Loaded { config, notice: None },
@@ -190,7 +214,10 @@ impl Config {
                 let _ = std::fs::rename(path, &bad);
                 Loaded {
                     config: Config::default(),
-                    notice: Some(format!("config.toml could not be read ({e}); it was moved to {}", bad.display())),
+                    notice: Some(format!(
+                        "config.toml could not be read ({e}); it was moved to {}",
+                        bad.display()
+                    )),
                 }
             }
         }
@@ -216,7 +243,10 @@ impl Config {
 
     pub fn active_profile_mut(&mut self) -> &mut Profile {
         if !self.profiles.iter().any(|p| p.name == self.active_profile) {
-            self.profiles.push(Profile { name: self.active_profile.clone(), ..Default::default() });
+            self.profiles.push(Profile {
+                name: self.active_profile.clone(),
+                ..Default::default()
+            });
         }
         let name = self.active_profile.clone();
         self.profiles.iter_mut().find(|p| p.name == name).expect("just ensured")
@@ -232,7 +262,10 @@ impl Config {
             candidate = format!("{base} {n}");
             n += 1;
         }
-        self.profiles.push(Profile { name: candidate.clone(), ..Default::default() });
+        self.profiles.push(Profile {
+            name: candidate.clone(),
+            ..Default::default()
+        });
         self.active_profile = candidate.clone();
         candidate
     }
@@ -243,7 +276,11 @@ impl Config {
         if new_name.is_empty() {
             return Err("profile name must not be empty".into());
         }
-        if self.profiles.iter().any(|p| p.name == new_name && p.name != self.active_profile) {
+        if self
+            .profiles
+            .iter()
+            .any(|p| p.name == new_name && p.name != self.active_profile)
+        {
             return Err(format!("a profile named '{new_name}' already exists"));
         }
         let old = self.active_profile.clone();
@@ -348,10 +385,16 @@ pub fn resolve(profile: &Profile, attached: &[AttachedMonitor]) -> Vec<Resolved>
         .enumerate()
         .map(|(index, m)| {
             let Some(source) = find(attached, &m.source) else {
-                return Resolved::Dormant { index, reason: "source monitor absent".into() };
+                return Resolved::Dormant {
+                    index,
+                    reason: "source monitor absent".into(),
+                };
             };
             let Some(target) = find(attached, &MonitorRef::Id(m.target.clone())) else {
-                return Resolved::Dormant { index, reason: "target monitor absent".into() };
+                return Resolved::Dormant {
+                    index,
+                    reason: "target monitor absent".into(),
+                };
             };
             let source_size = (source.info.width, source.info.height);
             let target_rect = area_to_rect(&m.target_area, target.info.width, target.info.height);
@@ -422,15 +465,19 @@ mod tests {
 
     #[test]
     fn toml_round_trip_preserves_everything() {
-        let mut c = Config::default();
-        c.last_target = Some("usb:WWIN29320251005160820".into());
+        let mut c = Config {
+            last_target: Some("usb:WWIN29320251005160820".into()),
+            ..Default::default()
+        };
         c.monitors.push(KnownMonitor {
             id: "edid:HPN:3582:CNK04611FZ".into(),
             label: "Main".into(),
             last_name: "HP 27xq".into(),
             last_size: [2560, 1440],
         });
-        c.active_profile_mut().mappings.push(mapping(MonitorRef::Primary, "usb:WWIN29320251005160820"));
+        c.active_profile_mut()
+            .mappings
+            .push(mapping(MonitorRef::Primary, "usb:WWIN29320251005160820"));
         let text = toml::to_string(&c).unwrap();
         assert!(text.contains("source = \"primary\""), "{text}");
         let back: Config = toml::from_str(&text).unwrap();
@@ -458,8 +505,10 @@ mod tests {
     fn save_then_load_round_trips_and_corrupt_file_is_renamed() {
         let dir = std::env::temp_dir().join(format!("mirage-test-{}-{}", std::process::id(), line!()));
         let path = dir.join("config.toml");
-        let mut c = Config::default();
-        c.last_target = Some("x".into());
+        let c = Config {
+            last_target: Some("x".into()),
+            ..Default::default()
+        };
         c.save(&path).unwrap();
         assert_eq!(Config::load(&path).config, c);
 
@@ -474,8 +523,24 @@ mod tests {
     #[test]
     fn effective_rect_scales_when_resolution_changed() {
         let m = mapping(MonitorRef::Primary, "t");
-        assert_eq!(m.effective_rect((2560, 1440)), Rect { x: 0, y: 1040, w: 400, h: 400 });
-        assert_eq!(m.effective_rect((1920, 1080)), Rect { x: 0, y: 780, w: 300, h: 300 });
+        assert_eq!(
+            m.effective_rect((2560, 1440)),
+            Rect {
+                x: 0,
+                y: 1040,
+                w: 400,
+                h: 400
+            }
+        );
+        assert_eq!(
+            m.effective_rect((1920, 1080)),
+            Rect {
+                x: 0,
+                y: 780,
+                w: 300,
+                h: 300
+            }
+        );
     }
 
     #[test]
@@ -483,22 +548,50 @@ mod tests {
         let mut m = mapping(MonitorRef::Primary, "t");
         m.source_size = [0, 0];
         m.source_rect = [2500, 0, 200, 200];
-        assert_eq!(m.effective_rect((2560, 1440)), Rect { x: 2500, y: 0, w: 60, h: 200 });
+        assert_eq!(
+            m.effective_rect((2560, 1440)),
+            Rect {
+                x: 2500,
+                y: 0,
+                w: 60,
+                h: 200
+            }
+        );
     }
 
     #[test]
     fn resolve_active_dormant_and_primary() {
         let mut p = Profile::default();
-        p.mappings.push(mapping(MonitorRef::Primary, "usb:WWIN29320251005160820"));
-        p.mappings.push(mapping(MonitorRef::Id("edid:HPN:3582:CNK04611NG".into()), "usb:WWIN29320251005160820"));
+        p.mappings
+            .push(mapping(MonitorRef::Primary, "usb:WWIN29320251005160820"));
+        p.mappings.push(mapping(
+            MonitorRef::Id("edid:HPN:3582:CNK04611NG".into()),
+            "usb:WWIN29320251005160820",
+        ));
         p.mappings.push(mapping(MonitorRef::Primary, "edid:GONE:0000:X"));
         let r = resolve(&p, &desk());
         match &r[0] {
             Resolved::Active(a) => {
                 assert_eq!(a.source_handle, 1);
                 assert_eq!(a.target_handle, 3);
-                assert_eq!(a.target_rect, Rect { x: 0, y: 0, w: 768, h: 1024 });
-                assert_eq!(a.source_rect, Rect { x: 0, y: 1040, w: 400, h: 400 });
+                assert_eq!(
+                    a.target_rect,
+                    Rect {
+                        x: 0,
+                        y: 0,
+                        w: 768,
+                        h: 1024
+                    }
+                );
+                assert_eq!(
+                    a.source_rect,
+                    Rect {
+                        x: 0,
+                        y: 1040,
+                        w: 400,
+                        h: 400
+                    }
+                );
             }
             other => panic!("{other:?}"),
         }
@@ -513,17 +606,57 @@ mod tests {
         m.target_area = vec![0.0, 0.5, 1.0, 0.5];
         p.mappings.push(m);
         match &resolve(&p, &desk())[0] {
-            Resolved::Active(a) => assert_eq!(a.target_rect, Rect { x: 0, y: 512, w: 768, h: 512 }),
+            Resolved::Active(a) => assert_eq!(
+                a.target_rect,
+                Rect {
+                    x: 0,
+                    y: 512,
+                    w: 768,
+                    h: 512
+                }
+            ),
             other => panic!("{other:?}"),
         }
     }
 
     #[test]
     fn area_to_rect_handles_whole_quarters_and_garbage() {
-        assert_eq!(area_to_rect(&[], 768, 1024), Rect { x: 0, y: 0, w: 768, h: 1024 });
-        assert_eq!(area_to_rect(&[0.5, 0.5, 0.5, 0.5], 768, 1024), Rect { x: 384, y: 512, w: 384, h: 512 });
-        assert_eq!(area_to_rect(&[0.0, 0.0, 0.0, 1.0], 768, 1024), Rect { x: 0, y: 0, w: 768, h: 1024 });
-        assert_eq!(area_to_rect(&[0.9, 0.9, 0.5, 0.5], 100, 100), Rect { x: 90, y: 90, w: 10, h: 10 });
+        assert_eq!(
+            area_to_rect(&[], 768, 1024),
+            Rect {
+                x: 0,
+                y: 0,
+                w: 768,
+                h: 1024
+            }
+        );
+        assert_eq!(
+            area_to_rect(&[0.5, 0.5, 0.5, 0.5], 768, 1024),
+            Rect {
+                x: 384,
+                y: 512,
+                w: 384,
+                h: 512
+            }
+        );
+        assert_eq!(
+            area_to_rect(&[0.0, 0.0, 0.0, 1.0], 768, 1024),
+            Rect {
+                x: 0,
+                y: 0,
+                w: 768,
+                h: 1024
+            }
+        );
+        assert_eq!(
+            area_to_rect(&[0.9, 0.9, 0.5, 0.5], 100, 100),
+            Rect {
+                x: 90,
+                y: 90,
+                w: 10,
+                h: 10
+            }
+        );
     }
 
     #[test]
@@ -541,7 +674,10 @@ mod tests {
         assert!(c.rename_active_profile("WarDogs").is_ok());
         assert_eq!(c.active_profile, "WarDogs");
         assert!(c.profiles.iter().any(|p| p.name == "WarDogs"));
-        assert!(c.rename_active_profile("WarDogs").is_ok(), "renaming to its own name is fine");
+        assert!(
+            c.rename_active_profile("WarDogs").is_ok(),
+            "renaming to its own name is fine"
+        );
 
         assert!(c.remove_active_profile().is_ok());
         assert_eq!(c.active_profile, "default");
@@ -584,7 +720,10 @@ mod tests {
     #[test]
     fn default_label_uses_the_last_three_chars_of_the_serial() {
         assert_eq!(default_label("HP 27xq", "edid:HPN:3582:CNK04611FZ"), "HP 27xq (1FZ)");
-        assert_eq!(default_label("USB_Monitor", "usb:WWIN29320251005160820"), "USB_Monitor (820)");
+        assert_eq!(
+            default_label("USB_Monitor", "usb:WWIN29320251005160820"),
+            "USB_Monitor (820)"
+        );
         assert_eq!(default_label("Generic", "path:DISPLAY\\X\\1&2"), "Generic");
     }
 }

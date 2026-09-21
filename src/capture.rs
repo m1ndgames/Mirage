@@ -62,8 +62,7 @@ impl MonitorCapture {
         session.SetIsCursorCaptureEnabled(false)?;
 
         // Same sequence OBS uses to get rid of the yellow capture border on Windows 11.
-        match GraphicsCaptureAccess::RequestAccessAsync(GraphicsCaptureAccessKind::Borderless)
-            .and_then(|op| op.join())
+        match GraphicsCaptureAccess::RequestAccessAsync(GraphicsCaptureAccessKind::Borderless).and_then(|op| op.join())
         {
             Ok(status) => println!("borderless access: {status:?}"),
             Err(e) => println!("borderless access request failed ({e}) – a border may be visible"),
@@ -73,7 +72,15 @@ impl MonitorCapture {
         }
 
         session.StartCapture()?;
-        Ok(Self { _item: item, pool, session, device, size, frame_event, frame_arrived_token })
+        Ok(Self {
+            _item: item,
+            pool,
+            session,
+            device,
+            size,
+            frame_event,
+            frame_arrived_token,
+        })
     }
 
     /// Waitable handle that becomes signalled when at least one frame is pending.
@@ -92,14 +99,22 @@ impl MonitorCapture {
         };
         let content = frame.ContentSize()?;
         if content.Width != self.size.Width || content.Height != self.size.Height {
-            println!("source size changed to {}x{} – recreating frame pool", content.Width, content.Height);
+            println!(
+                "source size changed to {}x{} – recreating frame pool",
+                content.Width, content.Height
+            );
             self.size = content;
             self.pool.Recreate(&self.device, FORMAT, BUFFERS, content)?;
             return Ok(None);
         }
         let access: IDirect3DDxgiInterfaceAccess = frame.Surface()?.cast()?;
         let texture: ID3D11Texture2D = unsafe { access.GetInterface() }?;
-        Ok(Some(CapturedFrame { _frame: frame, texture, width: content.Width, height: content.Height }))
+        Ok(Some(CapturedFrame {
+            _frame: frame,
+            texture,
+            width: content.Width,
+            height: content.Height,
+        }))
     }
 }
 
@@ -117,7 +132,13 @@ impl Drop for MonitorCapture {
 /// One frame of `monitor_handle` as a fresh texture, via a temporary capture
 /// session. A monitor that yields nothing within `timeout_ms` (e.g. one that
 /// is asleep) gives a black texture so selection still works there.
-pub fn grab_one_frame(d3d: &D3d, monitor_handle: isize, width: u32, height: u32, timeout_ms: u32) -> anyhow::Result<SourceTexture> {
+pub fn grab_one_frame(
+    d3d: &D3d,
+    monitor_handle: isize,
+    width: u32,
+    height: u32,
+    timeout_ms: u32,
+) -> anyhow::Result<SourceTexture> {
     let mut capture = MonitorCapture::new(d3d.winrt_device()?, monitor_handle)?;
     unsafe {
         let _ = WaitForSingleObjectEx(capture.frame_event(), timeout_ms, false);

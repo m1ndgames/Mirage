@@ -31,7 +31,11 @@ pub fn create_for_monitor(source_handle: isize) -> anyhow::Result<D3d> {
     let mut index = 0;
     while let Ok(adapter) = unsafe { factory.EnumAdapters1(index) } {
         let desc = unsafe { adapter.GetDesc1() }?;
-        let name_len = desc.Description.iter().position(|&c| c == 0).unwrap_or(desc.Description.len());
+        let name_len = desc
+            .Description
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(desc.Description.len());
         let name = String::from_utf16_lossy(&desc.Description[..name_len]);
         let software = desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0;
 
@@ -51,7 +55,7 @@ pub fn create_for_monitor(source_handle: isize) -> anyhow::Result<D3d> {
             if owner.is_none() && outputs.contains(&source_handle) {
                 owner = Some((adapter.clone(), name.clone()));
             }
-            if biggest.as_ref().map_or(true, |b| desc.DedicatedVideoMemory > b.2) {
+            if biggest.as_ref().is_none_or(|b| desc.DedicatedVideoMemory > b.2) {
                 biggest = Some((adapter.clone(), name.clone(), desc.DedicatedVideoMemory));
             }
         }

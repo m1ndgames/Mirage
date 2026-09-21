@@ -18,7 +18,17 @@ fn command() -> anyhow::Result<String> {
 fn open(access: windows::Win32::System::Registry::REG_SAM_FLAGS) -> anyhow::Result<HKEY> {
     let mut key = HKEY::default();
     let err = unsafe {
-        RegCreateKeyExW(HKEY_CURRENT_USER, RUN_KEY, None, PCWSTR::null(), REG_OPTION_NON_VOLATILE, access, None, &mut key, None)
+        RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            RUN_KEY,
+            None,
+            PCWSTR::null(),
+            REG_OPTION_NON_VOLATILE,
+            access,
+            None,
+            &mut key,
+            None,
+        )
     };
     ensure!(err == ERROR_SUCCESS, "opening HKCU\\...\\Run failed: {err:?}");
     Ok(key)
@@ -31,7 +41,8 @@ pub fn is_enabled() -> bool {
     let mut enabled = false;
     if unsafe { RegQueryValueExW(key, VALUE, None, None, None, Some(&mut len)) } == ERROR_SUCCESS && len >= 2 {
         let mut buf = vec![0u8; len as usize];
-        if unsafe { RegQueryValueExW(key, VALUE, None, None, Some(buf.as_mut_ptr()), Some(&mut len)) } == ERROR_SUCCESS {
+        if unsafe { RegQueryValueExW(key, VALUE, None, None, Some(buf.as_mut_ptr()), Some(&mut len)) } == ERROR_SUCCESS
+        {
             let wide: Vec<u16> = buf.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
             let text = String::from_utf16_lossy(&wide);
             let text = text.trim_end_matches('\0');
@@ -58,6 +69,9 @@ pub fn set(enabled: bool) -> anyhow::Result<()> {
         let _ = RegCloseKey(key);
     }
     // Deleting an entry that isn't there is fine.
-    ensure!(err == ERROR_SUCCESS || !enabled, "writing the Run entry failed: {err:?}");
+    ensure!(
+        err == ERROR_SUCCESS || !enabled,
+        "writing the Run entry failed: {err:?}"
+    );
     Ok(())
 }

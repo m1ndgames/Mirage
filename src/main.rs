@@ -36,7 +36,12 @@ fn main() {
     if let Err(e) = run() {
         eprintln!("{e:#}");
         unsafe {
-            MessageBoxW(None, &HSTRING::from(format!("{e:#}")), &HSTRING::from("Mirage"), MB_OK | MB_ICONERROR);
+            MessageBoxW(
+                None,
+                &HSTRING::from(format!("{e:#}")),
+                &HSTRING::from("Mirage"),
+                MB_OK | MB_ICONERROR,
+            );
         }
         std::process::exit(1);
     }
@@ -85,7 +90,14 @@ fn run() -> anyhow::Result<()> {
             let (event_tx, event_rx) = channel::<Event>();
             let engine = engine::spawn(event_tx, Arc::new(move || ctx.request_repaint()))?;
             engine.send(Command::Apply(config.clone()));
-            Ok(Box::new(ui::App::new(config, path, engine, event_rx, notice, start_hidden)))
+            Ok(Box::new(ui::App::new(
+                config,
+                path,
+                engine,
+                event_rx,
+                notice,
+                start_hidden,
+            )))
         }),
     )
     .map_err(|e| anyhow!("{e}"))

@@ -38,8 +38,20 @@ mod tests {
 
     #[test]
     fn parses_flags() {
-        assert_eq!(parse("--list"), Ok(Args { list: true, minimized: false }));
-        assert_eq!(parse("--minimized --list"), Ok(Args { list: true, minimized: true }));
+        assert_eq!(
+            parse("--list"),
+            Ok(Args {
+                list: true,
+                minimized: false
+            })
+        );
+        assert_eq!(
+            parse("--minimized --list"),
+            Ok(Args {
+                list: true,
+                minimized: true
+            })
+        );
     }
 
     #[test]

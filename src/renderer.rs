@@ -5,8 +5,9 @@ use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
 use windows::Win32::Graphics::Direct3D::{ID3DBlob, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST};
 use windows::Win32::Graphics::Direct3D11::{
     ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader, ID3D11RenderTargetView, ID3D11SamplerState,
-    ID3D11ShaderResourceView, ID3D11Texture2D, ID3D11VertexShader, D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_SHADER_RESOURCE,
-    D3D11_BUFFER_DESC, D3D11_FILTER, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_SAMPLER_DESC, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC,
+    ID3D11ShaderResourceView, ID3D11Texture2D, ID3D11VertexShader, D3D11_BIND_CONSTANT_BUFFER,
+    D3D11_BIND_SHADER_RESOURCE, D3D11_BUFFER_DESC, D3D11_FILTER, D3D11_FILTER_MIN_MAG_MIP_LINEAR,
+    D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_SAMPLER_DESC, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC,
     D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
@@ -39,7 +40,11 @@ impl SourceTexture {
     /// monitor yields no frame in time during selection.
     pub fn black(device: &ID3D11Device, width: u32, height: u32) -> anyhow::Result<Self> {
         let zeros = vec![0u8; (width * height * 4) as usize];
-        let init = D3D11_SUBRESOURCE_DATA { pSysMem: zeros.as_ptr() as *const _, SysMemPitch: width * 4, SysMemSlicePitch: 0 };
+        let init = D3D11_SUBRESOURCE_DATA {
+            pSysMem: zeros.as_ptr() as *const _,
+            SysMemPitch: width * 4,
+            SysMemSlicePitch: 0,
+        };
         Self::create(device, width, height, Some(&init as *const _))
     }
 
@@ -65,7 +70,12 @@ impl SourceTexture {
         let texture = texture.ok_or_else(|| anyhow!("no texture"))?;
         let mut srv = None;
         unsafe { device.CreateShaderResourceView(&texture, None, Some(&mut srv)) }?;
-        Ok(SourceTexture { texture, srv: srv.ok_or_else(|| anyhow!("no shader resource view"))?, width, height })
+        Ok(SourceTexture {
+            texture,
+            srv: srv.ok_or_else(|| anyhow!("no shader resource view"))?,
+            width,
+            height,
+        })
     }
 
     /// GPU copy; `frame` must have the same size and format.
@@ -163,9 +173,12 @@ impl Pipeline {
         let mut ps_mirror = None;
         let mut ps_overlay = None;
         unsafe {
-            d3d.device.CreateVertexShader(blob_bytes(&vs_blob), None, Some(&mut vs))?;
-            d3d.device.CreatePixelShader(blob_bytes(&ps_blob), None, Some(&mut ps_mirror))?;
-            d3d.device.CreatePixelShader(blob_bytes(&ov_blob), None, Some(&mut ps_overlay))?;
+            d3d.device
+                .CreateVertexShader(blob_bytes(&vs_blob), None, Some(&mut vs))?;
+            d3d.device
+                .CreatePixelShader(blob_bytes(&ps_blob), None, Some(&mut ps_mirror))?;
+            d3d.device
+                .CreatePixelShader(blob_bytes(&ov_blob), None, Some(&mut ps_overlay))?;
         }
         Ok(Pipeline {
             vs: vs.ok_or_else(|| anyhow!("no vertex shader"))?,
@@ -196,15 +209,31 @@ impl Pipeline {
 
     /// Draws the frozen `src` over the whole window, dimmed outside `selection`
     /// (frame pixels) with a border around it; no selection dims everything.
-    pub fn draw_overlay(&self, ctx: &ID3D11DeviceContext, target: &SwapChainTarget, src: &SourceTexture, selection: Option<Rect>) {
+    pub fn draw_overlay(
+        &self,
+        ctx: &ID3D11DeviceContext,
+        target: &SwapChainTarget,
+        src: &SourceTexture,
+        selection: Option<Rect>,
+    ) {
         let (w, h) = (src.width as f32, src.height as f32);
         let sel = match selection {
-            Some(r) => [r.x as f32 / w, r.y as f32 / h, (r.x + r.w) as f32 / w, (r.y + r.h) as f32 / h],
+            Some(r) => [
+                r.x as f32 / w,
+                r.y as f32 / h,
+                (r.x + r.w) as f32 / w,
+                (r.y + r.h) as f32 / h,
+            ],
             None => [0.0; 4],
         };
         let has = if selection.is_some() { 1.0 } else { 0.0 };
         let params: [f32; 8] = [sel[0], sel[1], sel[2], sel[3], 1.0 / w, 1.0 / h, has, 0.0];
-        let full = Rect { x: 0, y: 0, w: target.width as i32, h: target.height as i32 };
+        let full = Rect {
+            x: 0,
+            y: 0,
+            w: target.width as i32,
+            h: target.height as i32,
+        };
         unsafe {
             self.set_matrix(ctx, IDENTITY);
             ctx.UpdateSubresource(&self.overlay_buffer, 0, None, params.as_ptr() as *const _, 0, 0);
@@ -215,7 +244,14 @@ impl Pipeline {
         }
     }
 
-    unsafe fn bind(&self, ctx: &ID3D11DeviceContext, src: &SourceTexture, ps: &ID3D11PixelShader, dst: Rect, filter: Filter) {
+    unsafe fn bind(
+        &self,
+        ctx: &ID3D11DeviceContext,
+        src: &SourceTexture,
+        ps: &ID3D11PixelShader,
+        dst: Rect,
+        filter: Filter,
+    ) {
         let sampler = match filter {
             Filter::Linear => &self.sampler_linear,
             Filter::Nearest => &self.sampler_nearest,
@@ -285,7 +321,9 @@ fn compile(entry: PCSTR, target: PCSTR) -> anyhow::Result<ID3DBlob> {
         )
     };
     if let Err(e) = result {
-        let message = errors.map(|b| String::from_utf8_lossy(blob_bytes(&b)).into_owned()).unwrap_or_default();
+        let message = errors
+            .map(|b| String::from_utf8_lossy(blob_bytes(&b)).into_owned())
+            .unwrap_or_default();
         bail!("shader compilation failed: {e}\n{message}");
     }
     blob.ok_or_else(|| anyhow!("D3DCompile returned no bytecode"))

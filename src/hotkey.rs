@@ -29,7 +29,10 @@ pub fn parse(text: &str) -> Option<Hotkey> {
             }
         }
     }
-    Some(Hotkey { modifiers: modifiers.0, vk: vk? })
+    Some(Hotkey {
+        modifiers: modifiers.0,
+        vk: vk?,
+    })
 }
 
 fn key_code(key: &str) -> Option<u32> {

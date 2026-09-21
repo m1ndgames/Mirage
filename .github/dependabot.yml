@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # One PR for all the windows-* crates, one for egui/eframe – they move together.
+      windows:
+        patterns: ["windows", "windows-*"]
+      egui:
+        patterns: ["eframe", "egui*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

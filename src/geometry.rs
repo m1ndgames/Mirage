@@ -16,7 +16,12 @@ impl Rect {
         let y0 = self.y.clamp(0, height - 1);
         let x1 = (self.x + self.w).clamp(x0 + 1, width);
         let y1 = (self.y + self.h).clamp(y0 + 1, height);
-        Rect { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+        Rect {
+            x: x0,
+            y: y0,
+            w: x1 - x0,
+            h: y1 - y0,
+        }
     }
 }
 
@@ -26,13 +31,31 @@ mod tests {
 
     #[test]
     fn clamps_to_monitor_bounds() {
-        let r = Rect { x: -10, y: 1400, w: 3000, h: 100 };
-        assert_eq!(r.clamp_to(2560, 1440), Rect { x: 0, y: 1400, w: 2560, h: 40 });
+        let r = Rect {
+            x: -10,
+            y: 1400,
+            w: 3000,
+            h: 100,
+        };
+        assert_eq!(
+            r.clamp_to(2560, 1440),
+            Rect {
+                x: 0,
+                y: 1400,
+                w: 2560,
+                h: 40
+            }
+        );
     }
 
     #[test]
     fn clamp_never_produces_empty_rect() {
-        let r = Rect { x: 5000, y: 5000, w: 10, h: 10 };
+        let r = Rect {
+            x: 5000,
+            y: 5000,
+            w: 10,
+            h: 10,
+        };
         let c = r.clamp_to(2560, 1440);
         assert!(c.w >= 1 && c.h >= 1);
         assert!(c.x + c.w <= 2560 && c.y + c.h <= 1440);

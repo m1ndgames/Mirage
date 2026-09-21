@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and publish (windows x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the tag matches Cargo.toml
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          if ($tag -ne $version) {
+            Write-Error "tag v$tag does not match Cargo.toml version $version"
+            exit 1
+          }
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --release
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "mirage-${{ github.ref_name }}-windows-x86_64"
+          New-Item -ItemType Directory -Path dist/$name | Out-Null
+          Copy-Item target/release/mirage.exe, README.md, LICENSE dist/$name/
+          Compress-Archive -Path dist/$name -DestinationPath dist/$name.zip
+          Get-FileHash dist/$name.zip -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $name.zip" } | Set-Content dist/$name.zip.sha256
+          Get-ChildItem dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Mirage ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/*.zip
+            dist/*.sha256

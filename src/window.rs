@@ -13,8 +13,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, KillTimer, LoadCursorW, LoadIconW, PeekMessageW, PostQuitMessage, RegisterClassW,
     RegisterWindowMessageW, SetForegroundWindow, SetTimer, SetWindowLongPtrW, ShowWindow, TrackPopupMenu,
     TranslateMessage, CREATESTRUCTW, GWLP_USERDATA, IDC_ARROW, IDC_CROSS, IDI_APPLICATION, MA_NOACTIVATE, MF_SEPARATOR,
-    MF_STRING, MSG, PM_REMOVE, SW_SHOWNOACTIVATE, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WM_APP,
-    WM_CREATE, WM_DESTROY, WM_DEVICECHANGE, WM_DISPLAYCHANGE, WM_HOTKEY, WM_LBUTTONDBLCLK, WM_LBUTTONUP,
+    MF_STRING, MSG, PM_REMOVE, SW_SHOWNOACTIVATE, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOW_EX_STYLE,
+    WM_APP, WM_CREATE, WM_DESTROY, WM_DEVICECHANGE, WM_DISPLAYCHANGE, WM_HOTKEY, WM_LBUTTONDBLCLK, WM_LBUTTONUP,
     WM_MOUSEACTIVATE, WM_QUIT, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WNDPROC, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     WS_EX_TOPMOST, WS_POPUP,
 };
@@ -39,6 +39,7 @@ fn register_class(name: PCWSTR, proc: WNDPROC, cursor: PCWSTR) -> anyhow::Result
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create(
     ex_style: WINDOW_EX_STYLE,
     class: PCWSTR,
@@ -152,7 +153,10 @@ fn tray_data(hwnd: HWND) -> NOTIFYICONDATAW {
 /// Adds the tray icon to the message window. Explorer restarts are handled
 /// inside the window procedure (the "TaskbarCreated" broadcast re-adds it).
 pub fn add_tray_icon(hwnd: HWND) -> anyhow::Result<()> {
-    ensure!(unsafe { Shell_NotifyIconW(NIM_ADD, &tray_data(hwnd)) }.as_bool(), "Shell_NotifyIcon(NIM_ADD) failed");
+    ensure!(
+        unsafe { Shell_NotifyIconW(NIM_ADD, &tray_data(hwnd)) }.as_bool(),
+        "Shell_NotifyIcon(NIM_ADD) failed"
+    );
     Ok(())
 }
 
@@ -174,7 +178,16 @@ unsafe fn tray_menu(hwnd: HWND) -> Option<TrayAction> {
         let _ = GetCursorPos(&mut pos);
         // Without this the menu does not close when the user clicks elsewhere.
         let _ = SetForegroundWindow(hwnd);
-        let picked = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pos.x, pos.y, None, hwnd, None).0;
+        let picked = TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
+            pos.x,
+            pos.y,
+            None,
+            hwnd,
+            None,
+        )
+        .0;
         let _ = DestroyMenu(menu);
         match picked {
             1 => Some(TrayAction::ShowSettings),
@@ -191,7 +204,16 @@ unsafe fn tray_menu(hwnd: HWND) -> Option<TrayAction> {
 /// broadcast messages.
 pub fn create_message_window(signals: *const WindowSignals) -> anyhow::Result<HWND> {
     register_class(w!("MirageMessages"), Some(message_proc), IDC_ARROW)?;
-    create(WS_EX_TOOLWINDOW, w!("MirageMessages"), 0, 0, 0, 0, None, signals as *mut c_void)
+    create(
+        WS_EX_TOOLWINDOW,
+        w!("MirageMessages"),
+        0,
+        0,
+        0,
+        0,
+        None,
+        signals as *mut c_void,
+    )
 }
 
 unsafe extern "system" fn message_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {

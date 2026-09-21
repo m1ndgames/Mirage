@@ -8,7 +8,9 @@ use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND};
 use windows::Win32::System::Threading::{CreateEventW, SetEvent};
 use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
 use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_NOREPEAT};
-use windows::Win32::UI::WindowsAndMessaging::{DestroyWindow, MsgWaitForMultipleObjectsEx, MWMO_INPUTAVAILABLE, QS_ALLINPUT};
+use windows::Win32::UI::WindowsAndMessaging::{
+    DestroyWindow, MsgWaitForMultipleObjectsEx, MWMO_INPUTAVAILABLE, QS_ALLINPUT,
+};
 
 use crate::capture::MonitorCapture;
 use crate::config::{resolve, ActiveMapping, Config, Resolved};
@@ -89,13 +91,19 @@ impl Drop for EngineHandle {
 pub fn spawn(events: Sender<Event>, repaint: Arc<dyn Fn() + Send + Sync>) -> anyhow::Result<EngineHandle> {
     let (tx, rx) = std::sync::mpsc::channel();
     let wake = unsafe { CreateEventW(None, false, false, None) }?.0 as isize;
-    let thread = std::thread::Builder::new().name("mirage-render".into()).spawn(move || {
-        if let Err(e) = run(rx, wake, events.clone(), repaint.clone()) {
-            let _ = events.send(Event::Error(format!("render thread stopped: {e:#}")));
-            repaint();
-        }
-    })?;
-    Ok(EngineHandle { tx, wake, thread: Some(thread) })
+    let thread = std::thread::Builder::new()
+        .name("mirage-render".into())
+        .spawn(move || {
+            if let Err(e) = run(rx, wake, events.clone(), repaint.clone()) {
+                let _ = events.send(Event::Error(format!("render thread stopped: {e:#}")));
+                repaint();
+            }
+        })?;
+    Ok(EngineHandle {
+        tx,
+        wake,
+        thread: Some(thread),
+    })
 }
 
 struct Source {
@@ -138,7 +146,12 @@ struct Engine {
 
 const HOTKEY_ID: i32 = 1;
 
-fn run(rx: Receiver<Command>, wake: isize, events: Sender<Event>, repaint: Arc<dyn Fn() + Send + Sync>) -> anyhow::Result<()> {
+fn run(
+    rx: Receiver<Command>,
+    wake: isize,
+    events: Sender<Event>,
+    repaint: Arc<dyn Fn() + Send + Sync>,
+) -> anyhow::Result<()> {
     unsafe { RoInitialize(RO_INIT_MULTITHREADED) }?;
     let signals = Box::new(WindowSignals::default());
     let message_hwnd = window::create_message_window(&*signals as *const WindowSignals)?;
@@ -147,7 +160,10 @@ fn run(rx: Receiver<Command>, wake: isize, events: Sender<Event>, repaint: Arc<d
     }
     // The device is created for whatever is primary now; a primary on another
     // GPU would need a rebuild of the device – not supported (PLAN.md: one GPU).
-    let primary = identity::attached()?.into_iter().find(|m| m.info.is_primary).context("no primary monitor")?;
+    let primary = identity::attached()?
+        .into_iter()
+        .find(|m| m.info.is_primary)
+        .context("no primary monitor")?;
     let d3d = d3d::create_for_monitor(primary.info.handle)?;
     println!("rendering on {}", d3d.adapter_name);
     let pipeline = Pipeline::new(&d3d)?;
@@ -233,7 +249,9 @@ impl Engine {
             }
         }
         let Some(hk) = hotkey::parse(&wanted) else {
-            self.emit(Event::Error(format!("hotkey '{wanted}' is not valid – use e.g. Ctrl+Shift+R or F9")));
+            self.emit(Event::Error(format!(
+                "hotkey '{wanted}' is not valid – use e.g. Ctrl+Shift+R or F9"
+            )));
             return;
         };
         let modifiers = HOT_KEY_MODIFIERS(hk.modifiers) | MOD_NOREPEAT;
@@ -283,7 +301,14 @@ impl Engine {
         for handle in source_handles {
             match self.d3d.winrt_device().and_then(|dev| MonitorCapture::new(dev, handle)) {
                 Ok(capture) => {
-                    self.sources.insert(handle, Source { capture, texture: None, dirty: false });
+                    self.sources.insert(
+                        handle,
+                        Source {
+                            capture,
+                            texture: None,
+                            dirty: false,
+                        },
+                    );
                 }
                 Err(e) => self.emit(Event::Error(format!("capture of a source monitor failed: {e:#}"))),
             }
@@ -291,14 +316,28 @@ impl Engine {
 
         let target_handles: HashSet<isize> = self.active.iter().map(|m| m.target_handle).collect();
         for handle in target_handles {
-            let Some(monitor) = self.attached.iter().find(|m| m.info.handle == handle) else { continue };
+            let Some(monitor) = self.attached.iter().find(|m| m.info.handle == handle) else {
+                continue;
+            };
             let info = &monitor.info;
             let result = window::create_output_window(info.x, info.y, info.width, info.height)
                 .and_then(|w| SwapChainTarget::new(&self.d3d, w.hwnd, w.width as u32, w.height as u32).map(|t| (w, t)));
             match result {
                 Ok((window, target)) => {
-                    let mappings = self.active.iter().filter(|m| m.target_handle == handle).cloned().collect();
-                    self.outputs.insert(handle, Output { window, target, mappings });
+                    let mappings = self
+                        .active
+                        .iter()
+                        .filter(|m| m.target_handle == handle)
+                        .cloned()
+                        .collect();
+                    self.outputs.insert(
+                        handle,
+                        Output {
+                            window,
+                            target,
+                            mappings,
+                        },
+                    );
                 }
                 Err(e) => self.emit(Event::Error(format!("output window failed: {e:#}"))),
             }
@@ -321,18 +360,22 @@ impl Engine {
                     Ok(Some(frame)) => newest = Some(frame),
                     Ok(None) => break,
                     Err(e) => {
-                        let _ = self.events.send(Event::Error(format!("capture error on monitor {handle}: {e:#}")));
+                        let _ = self
+                            .events
+                            .send(Event::Error(format!("capture error on monitor {handle}: {e:#}")));
                         break;
                     }
                 }
             }
             if let Some(frame) = newest {
                 let (fw, fh) = (frame.width as u32, frame.height as u32);
-                if source.texture.as_ref().map_or(true, |t| t.width != fw || t.height != fh) {
+                if source.texture.as_ref().is_none_or(|t| t.width != fw || t.height != fh) {
                     match SourceTexture::new(device, fw, fh) {
                         Ok(t) => source.texture = Some(t),
                         Err(e) => {
-                            let _ = self.events.send(Event::Error(format!("texture creation failed: {e:#}")));
+                            let _ = self
+                                .events
+                                .send(Event::Error(format!("texture creation failed: {e:#}")));
                             continue;
                         }
                     }
@@ -349,14 +392,19 @@ impl Engine {
     fn present_dirty(&mut self) {
         let ctx = &self.d3d.context;
         for out in self.outputs.values() {
-            let needs = out.mappings.iter().any(|m| self.sources.get(&m.source_handle).is_some_and(|s| s.dirty));
+            let needs = out
+                .mappings
+                .iter()
+                .any(|m| self.sources.get(&m.source_handle).is_some_and(|s| s.dirty));
             if !needs {
                 continue;
             }
             out.target.wait_for_frame_slot();
             out.target.clear(ctx);
             for m in &out.mappings {
-                let Some(src) = self.sources.get(&m.source_handle).and_then(|s| s.texture.as_ref()) else { continue };
+                let Some(src) = self.sources.get(&m.source_handle).and_then(|s| s.texture.as_ref()) else {
+                    continue;
+                };
                 let (w, h) = (src.width as i32, src.height as i32);
                 let layout = transform::layout(&m.transform, m.source_rect.clamp_to(w, h), (w, h), m.target_rect);
                 self.pipeline.draw_mirror(ctx, src, &layout, m.transform.filter);

@@ -5,9 +5,9 @@ use eframe::egui;
 
 use crate::autostart;
 use crate::config::{self, Config, Mapping, MonitorRef, Resolved};
-use crate::transform::{Filter, Fit};
 use crate::engine::{Command, EngineHandle, Event, RegionSelected};
 use crate::identity::AttachedMonitor;
+use crate::transform::{Filter, Fit};
 
 pub struct App {
     config: Config,
@@ -100,7 +100,11 @@ impl App {
         };
         let target = {
             let m = &mut profile.mappings[index];
-            m.source = if r.is_primary { MonitorRef::Primary } else { MonitorRef::Id(r.monitor) };
+            m.source = if r.is_primary {
+                MonitorRef::Primary
+            } else {
+                MonitorRef::Id(r.monitor)
+            };
             m.source_rect = [r.rect.x, r.rect.y, r.rect.w, r.rect.h];
             m.source_size = [r.monitor_size.0, r.monitor_size.1];
             if m.target.is_empty() {
@@ -130,7 +134,10 @@ impl App {
     }
 
     fn label_for(&self, id: &str) -> String {
-        self.config.known(id).map(|k| k.label.clone()).unwrap_or_else(|| id.to_string())
+        self.config
+            .known(id)
+            .map(|k| k.label.clone())
+            .unwrap_or_else(|| id.to_string())
     }
 
     fn monitors_panel(&mut self, ui: &mut egui::Ui) {
@@ -173,13 +180,19 @@ impl App {
                         self.dirty = true;
                     }
                     None => {
-                        self.error = Some(format!("'{}' is not a valid hotkey – e.g. Ctrl+Shift+R or F9", self.hotkey_text));
+                        self.error = Some(format!(
+                            "'{}' is not a valid hotkey – e.g. Ctrl+Shift+R or F9",
+                            self.hotkey_text
+                        ));
                         self.hotkey_text = self.config.select_region_hotkey.clone();
                     }
                 }
             }
             ui.add_space(12.0);
-            if ui.checkbox(&mut self.config.start_minimized, "Start minimized to tray").changed() {
+            if ui
+                .checkbox(&mut self.config.start_minimized, "Start minimized to tray")
+                .changed()
+            {
                 self.dirty = true;
             }
             let mut autostart = self.autostart;
@@ -198,11 +211,13 @@ impl App {
         let names: Vec<String> = self.config.profiles.iter().map(|p| p.name.clone()).collect();
         let mut active = self.config.active_profile.clone();
         ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("profile").selected_text(active.clone()).show_ui(ui, |ui| {
-                for n in &names {
-                    ui.selectable_value(&mut active, n.clone(), n);
-                }
-            });
+            egui::ComboBox::from_id_salt("profile")
+                .selected_text(active.clone())
+                .show_ui(ui, |ui| {
+                    for n in &names {
+                        ui.selectable_value(&mut active, n.clone(), n);
+                    }
+                });
             if active != self.config.active_profile {
                 self.config.active_profile = active.clone();
                 self.profile_name = active;
@@ -243,14 +258,20 @@ impl App {
         ui.horizontal(|ui| {
             ui.add_space(24.0);
             ui.label("area");
-            let current = AREA_PRESETS.iter().find(|(_, a)| area_eq(a, &m.target_area)).map(|(n, _)| *n).unwrap_or("custom");
+            let current = AREA_PRESETS
+                .iter()
+                .find(|(_, a)| area_eq(a, &m.target_area))
+                .map(|(n, _)| *n)
+                .unwrap_or("custom");
             let mut choice = current;
-            egui::ComboBox::from_id_salt(("area", i)).selected_text(current).show_ui(ui, |ui| {
-                for (name, _) in AREA_PRESETS {
-                    ui.selectable_value(&mut choice, name, *name);
-                }
-                ui.selectable_value(&mut choice, "custom", "custom");
-            });
+            egui::ComboBox::from_id_salt(("area", i))
+                .selected_text(current)
+                .show_ui(ui, |ui| {
+                    for (name, _) in AREA_PRESETS {
+                        ui.selectable_value(&mut choice, name, *name);
+                    }
+                    ui.selectable_value(&mut choice, "custom", "custom");
+                });
             if choice != current {
                 m.target_area = match AREA_PRESETS.iter().find(|(n, _)| *n == choice) {
                     Some((_, a)) => a.to_vec(),
@@ -266,7 +287,10 @@ impl App {
                 for (k, label) in ["x", "y", "w", "h"].iter().enumerate() {
                     ui.label(*label);
                     let mut pct = m.target_area[k] * 100.0;
-                    if ui.add(egui::DragValue::new(&mut pct).range(0.0..=100.0).suffix("%").speed(1.0)).changed() {
+                    if ui
+                        .add(egui::DragValue::new(&mut pct).range(0.0..=100.0).suffix("%").speed(1.0))
+                        .changed()
+                    {
                         m.target_area[k] = (pct / 100.0).clamp(0.0, 1.0);
                         changed = true;
                     }
@@ -281,13 +305,17 @@ impl App {
     fn mappings_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Mappings");
         let statuses = config::resolve(self.config.active_profile(), &self.attached);
-        let known: Vec<(String, String)> = self.config.monitors.iter().map(|m| (m.id.clone(), m.label.clone())).collect();
+        let known: Vec<(String, String)> = self
+            .config
+            .monitors
+            .iter()
+            .map(|m| (m.id.clone(), m.label.clone()))
+            .collect();
         let attached_ids: Vec<String> = self.attached.iter().map(|m| m.id.clone()).collect();
         let mut remove = None;
         let mut select_for = None;
-        let count = self.config.active_profile().mappings.len();
-        for i in 0..count {
-            let status = match &statuses[i] {
+        for (i, resolved) in statuses.iter().enumerate() {
+            let status = match resolved {
                 Resolved::Active(_) => "active".to_string(),
                 Resolved::Dormant { reason, .. } => format!("dormant: {reason}"),
             };
@@ -297,14 +325,22 @@ impl App {
                     MonitorRef::Primary => "primary".to_string(),
                     MonitorRef::Id(id) => self.label_for(id),
                 };
-                (source_text, m.source_rect, matches!(m.source, MonitorRef::Primary), m.target.clone())
+                (
+                    source_text,
+                    m.source_rect,
+                    matches!(m.source, MonitorRef::Primary),
+                    m.target.clone(),
+                )
             };
             let highlighted = self.selected == Some(i);
             ui.horizontal(|ui| {
                 if ui.selectable_label(highlighted, format!("#{}", i + 1)).clicked() {
                     self.selected = Some(i);
                 }
-                ui.label(format!("{source_text}  [{}, {}, {}×{}]", rect[0], rect[1], rect[2], rect[3]));
+                ui.label(format!(
+                    "{source_text}  [{}, {}, {}×{}]",
+                    rect[0], rect[1], rect[2], rect[3]
+                ));
                 ui.label("→");
                 let target_label = known
                     .iter()
@@ -312,12 +348,18 @@ impl App {
                     .map(|(_, l)| l.clone())
                     .unwrap_or_else(|| "no target".into());
                 let mut new_target = target.clone();
-                egui::ComboBox::from_id_salt(("target", i)).selected_text(target_label).show_ui(ui, |ui| {
-                    for (id, label) in &known {
-                        let text = if attached_ids.contains(id) { label.clone() } else { format!("{label} (absent)") };
-                        ui.selectable_value(&mut new_target, id.clone(), text);
-                    }
-                });
+                egui::ComboBox::from_id_salt(("target", i))
+                    .selected_text(target_label)
+                    .show_ui(ui, |ui| {
+                        for (id, label) in &known {
+                            let text = if attached_ids.contains(id) {
+                                label.clone()
+                            } else {
+                                format!("{label} (absent)")
+                            };
+                            ui.selectable_value(&mut new_target, id.clone(), text);
+                        }
+                    });
                 if new_target != target {
                     self.config.active_profile_mut().mappings[i].target = new_target.clone();
                     self.config.last_target = Some(new_target);
@@ -384,23 +426,29 @@ impl App {
             changed |= ui.checkbox(&mut m.flip_h, "flip H").changed();
             changed |= ui.checkbox(&mut m.flip_v, "flip V").changed();
             ui.label("rotate");
-            egui::ComboBox::from_id_salt(("rotation", i)).selected_text(format!("{}°", m.rotation)).show_ui(ui, |ui| {
-                for r in [0u16, 90, 180, 270] {
-                    changed |= ui.selectable_value(&mut m.rotation, r, format!("{r}°")).changed();
-                }
-            });
+            egui::ComboBox::from_id_salt(("rotation", i))
+                .selected_text(format!("{}°", m.rotation))
+                .show_ui(ui, |ui| {
+                    for r in [0u16, 90, 180, 270] {
+                        changed |= ui.selectable_value(&mut m.rotation, r, format!("{r}°")).changed();
+                    }
+                });
             ui.label("fit");
-            egui::ComboBox::from_id_salt(("fit", i)).selected_text(fit_name(m.fit)).show_ui(ui, |ui| {
-                for f in [Fit::Fit, Fit::Fill, Fit::Stretch] {
-                    changed |= ui.selectable_value(&mut m.fit, f, fit_name(f)).changed();
-                }
-            });
+            egui::ComboBox::from_id_salt(("fit", i))
+                .selected_text(fit_name(m.fit))
+                .show_ui(ui, |ui| {
+                    for f in [Fit::Fit, Fit::Fill, Fit::Stretch] {
+                        changed |= ui.selectable_value(&mut m.fit, f, fit_name(f)).changed();
+                    }
+                });
             ui.label("filter");
-            egui::ComboBox::from_id_salt(("filter", i)).selected_text(filter_name(m.filter)).show_ui(ui, |ui| {
-                for f in [Filter::Linear, Filter::Nearest] {
-                    changed |= ui.selectable_value(&mut m.filter, f, filter_name(f)).changed();
-                }
-            });
+            egui::ComboBox::from_id_salt(("filter", i))
+                .selected_text(filter_name(m.filter))
+                .show_ui(ui, |ui| {
+                    for f in [Filter::Linear, Filter::Nearest] {
+                        changed |= ui.selectable_value(&mut m.filter, f, filter_name(f)).changed();
+                    }
+                });
         });
         if changed {
             self.dirty = true;
