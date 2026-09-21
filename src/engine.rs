@@ -16,6 +16,7 @@ use crate::d3d::{self, D3d};
 use crate::geometry::Rect;
 use crate::hotkey;
 use crate::identity::{self, AttachedMonitor, MonitorId};
+use crate::overlay::{Outcome, Selection};
 use crate::renderer::{Pipeline, SourceTexture, SwapChainTarget};
 use crate::window::{self, OutputWindow, WindowSignals};
 
@@ -127,6 +128,7 @@ struct Engine {
     built_once: bool,
     /// The hotkey text currently registered, so Apply only re-registers on change.
     registered_hotkey: Option<String>,
+    selection: Option<Selection>,
 }
 
 const HOTKEY_ID: i32 = 1;
@@ -154,6 +156,7 @@ fn run(rx: Receiver<Command>, wake: isize, events: Sender<Event>, repaint: Arc<d
         outputs: HashMap::new(),
         built_once: false,
         registered_hotkey: None,
+        selection: None,
     };
     engine.rebuild();
 
@@ -190,6 +193,7 @@ fn run(rx: Receiver<Command>, wake: isize, events: Sender<Event>, repaint: Arc<d
         }
         engine.pump_frames();
         engine.present_dirty();
+        engine.pump_selection();
     }
     Ok(())
 }
@@ -238,6 +242,11 @@ impl Engine {
         let attached_changed = attached != self.attached;
         self.attached = attached;
         self.emit(Event::MonitorsChanged(self.attached.clone()));
+        if attached_changed && self.selection.is_some() {
+            // The overlays no longer match the desktop; the user starts over.
+            self.selection = None;
+            self.emit(Event::SelectionCancelled);
+        }
 
         let active: Vec<ActiveMapping> = resolve(self.config.active_profile(), &self.attached)
             .into_iter()
@@ -346,6 +355,37 @@ impl Engine {
     }
 
     fn start_selection(&mut self) {
-        self.emit(Event::Error("region selection is not implemented yet".into()));
+        if self.selection.is_some() {
+            return;
+        }
+        match Selection::start(&self.d3d, &self.attached) {
+            Ok(s) => self.selection = Some(s),
+            Err(e) => self.emit(Event::Error(format!("could not start region selection: {e:#}"))),
+        }
+    }
+
+    /// Repaints the overlays and finishes the selection once the user is done.
+    fn pump_selection(&mut self) {
+        let Some(sel) = self.selection.as_mut() else { return };
+        sel.redraw(&self.d3d, &self.pipeline);
+        let outcome = sel.poll();
+        match outcome {
+            None => {}
+            Some(Outcome::Cancelled) => {
+                self.selection = None;
+                self.emit(Event::SelectionCancelled);
+            }
+            Some(Outcome::Done { monitor_index, rect }) => {
+                self.selection = None;
+                if let Some(m) = self.attached.get(monitor_index) {
+                    self.emit(Event::RegionSelected(RegionSelected {
+                        monitor: m.id.clone(),
+                        is_primary: m.info.is_primary,
+                        rect,
+                        monitor_size: (m.info.width, m.info.height),
+                    }));
+                }
+            }
+        }
     }
 }
