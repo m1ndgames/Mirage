@@ -102,7 +102,7 @@ overlay   Win32 windows on the render thread, one per monitor, frozen D3D textur
 identity  EDID / USB-serial / connector-path ids joined to HMONITORs via DisplayConfig
 config    profiles / mappings, TOML load & save, resolve() against the attached monitors
 engine    the render thread: commands in, events out, sources/outputs, topology rebuild, hotkey
-ui        eframe settings window; M4 adds tray icon and foreground-process watcher
+ui        eframe settings window; tray icon and menu live on the render thread's message window
 ```
 
 Capture and output share one D3D11 device (same GPU). Config changes flow from the UI to the render side
@@ -110,7 +110,7 @@ via a channel; the render loop never blocks on the UI.
 
 ## Data model
 
-A **Profile** is a list of **Mappings** plus an optional process name for auto-activation.
+A **Profile** is a named list of **Mappings**; the active one is switched by hand.
 
 Mapping:
 - `source`: monitor id + rect (physical pixels)
@@ -166,9 +166,7 @@ label: name + serial suffix.
 
 ### Beyond MVP
 - Profiles: several mappings per profile, one profile per game
-- Auto-activate a profile when a given process (e.g. `DCS.exe`, `WarDogs.exe`) is in the foreground
 - Global hotkeys: re-select region, toggle output, switch profile
-- Tray icon, start minimised, autostart with Windows
 - Numeric entry of region coordinates (for games where the overlay cannot be shown, see below)
 
 ### Ideas for later
@@ -229,7 +227,12 @@ label: name + serial suffix.
   Profile bar (switch / new / rename / delete), `target_area` as fractions of the target monitor with
   tiling presets (halves, quarters) and a custom percent entry. Fractions instead of pixels so a tile
   survives a resolution change of the target.
-- **M4 – Polish:** tray icon, hotkeys, autostart, process-based profile switching.
+- **M4 – Polish:** tray icon, hotkeys, autostart. **Done 2026-09-21.** Close-to-tray with a tray menu
+  (Settings / Select region / Quit), `--minimized` + "Start minimized" option, hotkey editable in the
+  window, "Start with Windows" via the HKCU Run key, no console window (`windows_subsystem`; `--list`
+  attaches to the parent console), fatal errors as a message box. **Process-based profile switching was
+  dropped by the user's decision** – even a handle-free foreground-process lookup is more than "display
+  only" needs; profiles are switched manually.
 
 ### M0 results (2026-09-21)
 
