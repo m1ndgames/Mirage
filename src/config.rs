@@ -123,7 +123,7 @@ impl Default for Config {
             version: 1,
             active_profile: "default".into(),
             last_target: None,
-            select_region_hotkey: "Ctrl+Alt+M".into(),
+            select_region_hotkey: crate::hotkey::DEFAULT.into(),
             monitors: Vec::new(),
             profiles: vec![Profile::default()],
         }
@@ -343,7 +343,7 @@ mod tests {
         assert_eq!(c.active_profile, "default");
         assert_eq!(c.profiles.len(), 1);
         assert!(c.profiles[0].mappings.is_empty());
-        assert_eq!(c.select_region_hotkey, "Ctrl+Alt+M");
+        assert_eq!(c.select_region_hotkey, "Ctrl+Shift+R");
     }
 
     #[test]

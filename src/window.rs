@@ -8,7 +8,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetWindowLongPtrW, KillTimer, LoadCursorW, PeekMessageW,
     PostQuitMessage, RegisterClassW, SetTimer, SetWindowLongPtrW, ShowWindow, TranslateMessage, CREATESTRUCTW,
-    GWLP_USERDATA, HWND_MESSAGE, IDC_ARROW, IDC_CROSS, MA_NOACTIVATE, MSG, PM_REMOVE, SW_SHOWNOACTIVATE, WINDOW_EX_STYLE,
+    GWLP_USERDATA, IDC_ARROW, IDC_CROSS, MA_NOACTIVATE, MSG, PM_REMOVE, SW_SHOWNOACTIVATE, WINDOW_EX_STYLE,
     WM_CREATE, WM_DESTROY, WM_DEVICECHANGE, WM_DISPLAYCHANGE, WM_HOTKEY, WM_MOUSEACTIVATE, WM_QUIT, WM_TIMER, WNDCLASSW,
     WNDPROC, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
@@ -117,10 +117,12 @@ pub struct WindowSignals {
 const TOPOLOGY_TIMER: usize = 1;
 
 /// Hidden window that receives WM_DISPLAYCHANGE / WM_DEVICECHANGE (debounced
-/// into `topology_changed` 500 ms after the last one) and WM_HOTKEY.
+/// into `topology_changed` 500 ms after the last one) and WM_HOTKEY. It must
+/// be a real top-level window (never shown): message-only windows do not get
+/// broadcast messages.
 pub fn create_message_window(signals: *const WindowSignals) -> anyhow::Result<HWND> {
     register_class(w!("MirageMessages"), Some(message_proc), IDC_ARROW)?;
-    create(WINDOW_EX_STYLE(0), w!("MirageMessages"), 0, 0, 0, 0, Some(HWND_MESSAGE), signals as *mut c_void)
+    create(WS_EX_TOOLWINDOW, w!("MirageMessages"), 0, 0, 0, 0, None, signals as *mut c_void)
 }
 
 unsafe extern "system" fn message_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
