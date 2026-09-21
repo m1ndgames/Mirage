@@ -1,12 +1,13 @@
-// One full-screen triangle; the crop is applied by remapping its UVs.
+// One full-screen triangle over the viewport; a 2x3 matrix maps its UVs into
+// the source texture (crop, flips, rotation and fill-crop folded into it).
 cbuffer Crop : register(b0)
 {
-    float2 uv_offset; // top-left of the crop in [0,1]
-    float2 uv_scale;  // size of the crop in [0,1]
+    float4 row0;   // su = row0.x*u + row0.y*v + row0.z
+    float4 row1;   // sv = row1.x*u + row1.y*v + row1.z
 };
 
-Texture2D    source       : register(t0);
-SamplerState linear_clamp : register(s0);
+Texture2D    source         : register(t0);
+SamplerState source_sampler : register(s0);
 
 struct VsOut
 {
@@ -20,13 +21,14 @@ VsOut vs_main(uint id : SV_VertexID)
     float2 uv = float2((id << 1) & 2, id & 2);
     VsOut o;
     o.pos = float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
-    o.uv = uv_offset + uv * uv_scale;
+    float3 q = float3(uv, 1.0);
+    o.uv = float2(dot(row0.xyz, q), dot(row1.xyz, q));
     return o;
 }
 
 float4 ps_main(VsOut i) : SV_Target
 {
-    return source.Sample(linear_clamp, i.uv);
+    return source.Sample(source_sampler, i.uv);
 }
 
 // Selection overlay: frozen frame, dimmed outside the selection, 2 px border.
@@ -38,7 +40,7 @@ cbuffer Overlay : register(b1)
 
 float4 ps_overlay(VsOut i) : SV_Target
 {
-    float4 c = source.Sample(linear_clamp, i.uv);
+    float4 c = source.Sample(source_sampler, i.uv);
     float4 dim = c * float4(0.4, 0.4, 0.4, 1.0);
     if (px.z < 0.5)
         return dim;
